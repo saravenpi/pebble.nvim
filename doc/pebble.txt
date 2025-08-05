@@ -1,0 +1,183 @@
+*pebble.txt*   Obsidian-style markdown link navigation for Neovim
+
+                    _______________
+                   /               \
+                  |    Pebble      |
+                   \_______________/
+                         |
+                    Markdown Links
+
+Author: Your Name
+License: MIT
+Version: 1.0.0
+
+==============================================================================
+CONTENTS                                                    *pebble-contents*
+
+1. Introduction.........................|pebble-introduction|
+2. Installation.........................|pebble-installation|
+3. Usage................................|pebble-usage|
+4. Commands.............................|pebble-commands|
+5. Keymaps..............................|pebble-keymaps|
+6. Configuration........................|pebble-configuration|
+7. Features.............................|pebble-features|
+8. FAQ..................................|pebble-faq|
+
+==============================================================================
+1. INTRODUCTION                                         *pebble-introduction*
+
+Pebble is a Neovim plugin that provides Obsidian-style markdown link 
+navigation and management. It allows you to:
+
+• Navigate between markdown files using [[wiki-style]] links
+• Create new files from links automatically
+• View an interactive graph of connected files
+• Navigate with history (back/forward)
+• Create links from selected text
+• Cache file lookups for performance
+
+==============================================================================
+2. INSTALLATION                                         *pebble-installation*
+
+Install using your preferred plugin manager:
+
+Using lazy.nvim: >
+    {
+        dir = "path/to/pebble",
+        config = function()
+            require('pebble').setup({
+                auto_setup_keymaps = true,
+                global_keymaps = false
+            })
+        end
+    }
+<
+
+Using Packer: >
+    use {
+        'path/to/pebble',
+        config = function()
+            require('pebble').setup()
+        end
+    }
+<
+
+==============================================================================
+3. USAGE                                                       *pebble-usage*
+
+Basic usage:
+
+1. Open a markdown file
+2. Create links using [[file-name]] syntax
+3. Place cursor on a link and press <CR> to follow it
+4. If the file doesn't exist, it will be created automatically
+5. Use <Tab> and <S-Tab> to navigate between links
+6. Use navigation history to go back and forward
+
+==============================================================================
+4. COMMANDS                                                 *pebble-commands*
+
+*:PebbleFollow*        Follow the link under cursor
+*:PebbleNext*          Move to next link in buffer
+*:PebblePrev*          Move to previous link in buffer
+*:PebbleBack*          Go back in navigation history
+*:PebbleForward*       Go forward in navigation history
+*:PebbleGraph*         Toggle interactive link graph view
+*:PebbleHistory*       Show navigation history (debug)
+*:PebbleStats*         Show cache performance statistics
+*:PebbleCreateLinkAndNavigate* Create link, file and navigate (visual mode)
+*:PebbleCreateLinkAndFile* Create link and file without navigation (visual mode)
+
+==============================================================================
+5. KEYMAPS                                                   *pebble-keymaps*
+
+Default keymaps (markdown files only):
+
+*<CR>*           Follow link under cursor
+*<Tab>*          Next link in buffer  
+*<S-Tab>*        Previous link in buffer
+*<leader>mc*     Create link, file and navigate (visual mode)
+*<leader>ml*     Create link and file without navigation (visual mode)
+
+Optional global keymaps (disabled by default):
+
+*<leader>mg*     Toggle link graph
+*<leader>mb*     Go back in history
+*<leader>mf*     Go forward in history
+
+==============================================================================
+6. CONFIGURATION                                       *pebble-configuration*
+
+Setup options: >
+    require('pebble').setup({
+        -- Automatically set up keymaps for markdown files
+        auto_setup_keymaps = true,
+        
+        -- Set up global keymaps (disabled by default)
+        global_keymaps = false
+    })
+<
+
+To disable automatic keymaps and set your own: >
+    require('pebble').setup({
+        auto_setup_keymaps = false
+    })
+    
+    -- Then set your own keymaps
+    vim.keymap.set('n', 'gf', require('pebble').follow_link)
+<
+
+==============================================================================
+7. FEATURES                                                 *pebble-features*
+
+Link Types Supported:
+• [[wiki-style]] links (Obsidian format)
+• [text](file.md) standard markdown links
+• [text](https://url.com) external URLs (opens in browser)
+
+Performance Features:
+• Intelligent file caching with invalidation
+• Graph view caching with TTL
+• Limited file scanning to prevent slowdowns
+• Git-aware root directory detection
+
+Navigation Features:
+• Forward/backward history navigation
+• Smart link jumping with Tab/Shift-Tab
+• Interactive graph view with keyboard navigation
+• Automatic file creation from links
+• Visual selection to link conversion
+
+Graph View Features:
+• Clean, borderless design
+• Interactive navigation with j/k or arrows
+• Shows incoming/outgoing links
+• Highlights missing files
+• Performance statistics
+• Keyboard shortcuts: q/Esc to close, Enter to open
+
+==============================================================================
+8. FAQ                                                           *pebble-faq*
+
+Q: How does file lookup work?
+A: Pebble builds a cache of all .md files in your git repository (or current
+   working directory). It uses filename-without-extension as the lookup key.
+
+Q: What happens if I have duplicate filenames?
+A: The first match found will be used. Consider using subdirectories or
+   unique names to avoid conflicts.
+
+Q: Can I customize the link format?
+A: Currently only [[wiki]] and [text](link) formats are supported. More
+   formats may be added in future versions.
+
+Q: How do I clear the cache?
+A: The cache automatically invalidates when files are created, modified, or
+   deleted. You can also restart Neovim to clear all caches.
+
+Q: Why is the graph view limited to 200 files?
+A: This prevents performance issues in large repositories. The limit can be
+   adjusted by modifying MAX_FILES_TO_SCAN in the source code.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
