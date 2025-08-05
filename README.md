@@ -1,4 +1,4 @@
-# Pebble 🪨
+# pebble.nvim 🪨
 
 Obsidian-style markdown link navigation for Neovim.
 
@@ -92,8 +92,8 @@ Set `global_keymaps = true` in setup to enable:
 require('pebble').setup({
     -- Automatically set up keymaps for markdown files
     auto_setup_keymaps = true,
-    
-    -- Set up global keymaps (disabled by default)  
+
+    -- Set up global keymaps (disabled by default)
     global_keymaps = false
 })
 ```
