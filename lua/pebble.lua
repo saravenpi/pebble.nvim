@@ -756,6 +756,287 @@ local function find_interactive_line(interactive_lines, current_line, direction)
     return lines[current_idx]
 end
 
+--- Create enhanced visual ASCII graph with boxes and connections
+local function create_visual_graph_text(graph, current_name)
+    local lines = {}
+    local interactive_lines = {}
+    
+    local function add_line(content, is_interactive, filename)
+        lines[#lines + 1] = content
+        interactive_lines[#lines] = {
+            interactive = is_interactive or false,
+            filename = filename
+        }
+    end
+    
+    -- Calculate optimal dimensions based on content
+    local function calculate_dimensions(files, current_name)
+        local max_filename_length = string.len(current_name) + 4  -- Add space for "● " and " ●"
+        
+        for _, file in ipairs(files) do
+            local display_text = file
+            if not (graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1) then
+                display_text = file .. " (missing)"
+            end
+            max_filename_length = math.max(max_filename_length, string.len(display_text))
+        end
+        
+        -- Ensure minimum width and add padding
+        local box_width = math.max(20, math.min(50, max_filename_length + 6))
+        local total_width = math.max(65, box_width + 20)
+        
+        return box_width, total_width
+    end
+    
+    local function create_box(text, width, center_pos)
+        local content_width = width - 4
+        local truncated = string.len(text) > content_width and string.sub(text, 1, content_width - 3) .. "..." or text
+        local padding = content_width - string.len(truncated)
+        local left_pad = math.floor(padding / 2)
+        local right_pad = padding - left_pad
+        
+        local left_margin = center_pos - math.floor(width / 2)
+        local margin_str = string.rep(" ", math.max(0, left_margin))
+        
+        local top_line = margin_str .. "┌" .. string.rep("─", width - 2) .. "┐"
+        local content_line = margin_str .. "│ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " │"
+        local bottom_line = margin_str .. "└" .. string.rep("─", width - 2) .. "┘"
+        
+        return {top_line, content_line, bottom_line}
+    end
+    
+    local function create_connection_line(center_pos, symbol)
+        local margin_str = string.rep(" ", math.max(0, center_pos))
+        return margin_str .. symbol
+    end
+    
+    local incoming_files = {}
+    local outgoing_files = {}
+    
+    for file, _ in pairs(graph[current_name].incoming) do
+        table.insert(incoming_files, file)
+    end
+    table.sort(incoming_files)
+    
+    for file, _ in pairs(graph[current_name].outgoing) do
+        table.insert(outgoing_files, file)
+    end
+    table.sort(outgoing_files)
+    
+    -- Calculate dimensions based on all content
+    local all_files = {}
+    for _, file in ipairs(incoming_files) do table.insert(all_files, file) end
+    for _, file in ipairs(outgoing_files) do table.insert(all_files, file) end
+    
+    local box_width, total_width = calculate_dimensions(all_files, current_name)
+    local center_pos = math.floor(total_width / 2)
+    
+    -- Create dynamic header
+    local header_text = "Pebble Visual Graph"
+    local header_padding = total_width - string.len(header_text) - 4
+    local header_left_pad = math.floor(header_padding / 2)
+    local header_right_pad = header_padding - header_left_pad
+    
+    add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
+    add_line("║" .. string.rep(" ", header_left_pad) .. header_text .. string.rep(" ", header_right_pad) .. "║", false)
+    add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
+    add_line("", false)
+    
+    -- Incoming files section
+    if #incoming_files > 0 then
+        local section_text = "INCOMING LINKS"
+        local section_margin = center_pos - math.floor(string.len(section_text) / 2) - 1
+        add_line(string.rep(" ", math.max(0, section_margin)) .. "┌─ " .. section_text .. " ─┐", false)
+        add_line("", false)
+        
+        for i, file in ipairs(incoming_files) do
+            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
+            local display_text = exists and file or (file .. " (missing)")
+            local box_lines = create_box(display_text, box_width, center_pos)
+            
+            add_line(box_lines[1], exists, exists and file or nil)
+            add_line(box_lines[2], exists, exists and file or nil)
+            add_line(box_lines[3], exists, exists and file or nil)
+            
+            if i < #incoming_files then
+                add_line(create_connection_line(center_pos, "│"), false)
+                add_line(create_connection_line(center_pos, "▼"), false)
+            else
+                add_line(create_connection_line(center_pos, "│"), false)
+                add_line(create_connection_line(center_pos, "▼"), false)
+            end
+        end
+        add_line("", false)
+    end
+    
+    -- Current file (always centered)
+    local current_display = "● " .. current_name .. " ●"
+    local current_box_width = math.max(box_width, string.len(current_display) + 6)
+    local current_box = create_box(current_display, current_box_width, center_pos)
+    add_line(current_box[1], false)
+    add_line(current_box[2], false)
+    add_line(current_box[3], false)
+    add_line("", false)
+    
+    -- Outgoing files section
+    if #outgoing_files > 0 then
+        add_line(create_connection_line(center_pos, "│"), false)
+        add_line(create_connection_line(center_pos, "▼"), false)
+        
+        local section_text = "OUTGOING LINKS"
+        local section_margin = center_pos - math.floor(string.len(section_text) / 2) - 1
+        add_line(string.rep(" ", math.max(0, section_margin)) .. "┌─ " .. section_text .. " ─┐", false)
+        add_line("", false)
+        
+        for i, file in ipairs(outgoing_files) do
+            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
+            local display_text = exists and file or (file .. " (missing)")
+            local box_lines = create_box(display_text, box_width, center_pos)
+            
+            add_line(box_lines[1], exists, exists and file or nil)
+            add_line(box_lines[2], exists, exists and file or nil)
+            add_line(box_lines[3], exists, exists and file or nil)
+            
+            if i < #outgoing_files then
+                add_line(create_connection_line(center_pos, "│"), false)
+                add_line(create_connection_line(center_pos, "▼"), false)
+            end
+        end
+        add_line("", false)
+    end
+    
+    -- Footer with stats
+    local total_files = 0
+    for _ in pairs(graph) do total_files = total_files + 1 end
+    
+    local stats_text = "Files: " .. total_files .. " │ Out: " .. #outgoing_files .. " │ In: " .. #incoming_files
+    local help_text = "↑/↓: Navigate │ Enter: Open │ q: Close"
+    
+    local stats_padding = total_width - string.len(stats_text) - 4
+    local help_padding = total_width - string.len(help_text) - 4
+    
+    add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
+    add_line("║ " .. stats_text .. string.rep(" ", math.max(0, stats_padding)) .. " ║", false)
+    add_line("║ " .. help_text .. string.rep(" ", math.max(0, help_padding)) .. " ║", false)
+    add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
+    
+    return lines, interactive_lines
+end
+
+--- Set up syntax highlighting for the visual graph view
+local function setup_visual_graph_syntax(buf)
+    vim.api.nvim_buf_call(buf, function()
+        vim.cmd('syntax clear')
+        
+        vim.cmd('syntax match VisualGraphBorder /[╔╗╚╝═║┌┐└┘─│▼▲◄►]/') 
+        vim.cmd('syntax match VisualGraphTitle /Pebble Visual Graph/')
+        vim.cmd('syntax match VisualGraphCurrent /● .* ●/')
+        vim.cmd('syntax match VisualGraphSection /INCOMING LINKS\\|OUTGOING LINKS/')
+        vim.cmd('syntax match VisualGraphMissing /(missing)/')
+        vim.cmd('syntax match VisualGraphStats /Files:.*/')
+        vim.cmd('syntax match VisualGraphHelp /↑\\/↓:.*/')
+        
+        vim.cmd('highlight VisualGraphBorder guifg=#89b4fa ctermfg=117 gui=bold')
+        vim.cmd('highlight VisualGraphTitle guifg=#b4befe ctermfg=147 gui=bold')
+        vim.cmd('highlight VisualGraphCurrent guifg=#f9e2af ctermfg=221 gui=bold')
+        vim.cmd('highlight VisualGraphSection guifg=#a6e3a1 ctermfg=151 gui=bold')
+        vim.cmd('highlight VisualGraphMissing guifg=#f38ba8 ctermfg=210 gui=italic')
+        vim.cmd('highlight VisualGraphStats guifg=#cdd6f4 ctermfg=189')
+        vim.cmd('highlight VisualGraphHelp guifg=#6c7086 ctermfg=245 gui=italic')
+    end)
+end
+
+--- Toggle the enhanced visual graph view
+function M.toggle_visual_graph()
+    if graph_win and vim.api.nvim_win_is_valid(graph_win) then
+        vim.api.nvim_win_close(graph_win, true)
+        if graph_buf and vim.api.nvim_buf_is_valid(graph_buf) then
+            vim.api.nvim_buf_delete(graph_buf, { force = true })
+        end
+        graph_win = nil
+        graph_buf = nil
+        return
+    end
+    
+    local graph, current_name = build_link_graph()
+    local graph_lines, interactive_lines = create_visual_graph_text(graph, current_name)
+    
+    graph_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(graph_buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(graph_buf, 'bufhidden', 'wipe')
+    vim.api.nvim_buf_set_option(graph_buf, 'filetype', 'pebble-visual-graph')
+    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', false)
+    
+    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', true)
+    vim.api.nvim_buf_set_lines(graph_buf, 0, -1, false, graph_lines)
+    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', false)
+    
+    setup_visual_graph_syntax(graph_buf)
+    
+    local height = math.min(#graph_lines + 2, math.floor(vim.o.lines * 0.6))
+    vim.cmd('botright ' .. height .. 'split')
+    graph_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(graph_win, graph_buf)
+    
+    vim.api.nvim_win_set_option(graph_win, 'wrap', false)
+    vim.api.nvim_win_set_option(graph_win, 'cursorline', true)
+    vim.api.nvim_win_set_option(graph_win, 'number', false)
+    vim.api.nvim_win_set_option(graph_win, 'relativenumber', false)
+    vim.api.nvim_win_set_option(graph_win, 'signcolumn', 'no')
+    vim.api.nvim_win_set_option(graph_win, 'cursorlineopt', 'both')
+    
+    local opts = { buffer = graph_buf, nowait = true, silent = true }
+    
+    vim.keymap.set('n', 'q', M.toggle_visual_graph, opts)
+    vim.keymap.set('n', '<ESC>', M.toggle_visual_graph, opts)
+    
+    vim.keymap.set('n', 'j', function()
+        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
+        local next_line = find_interactive_line(interactive_lines, current_line, 1)
+        vim.api.nvim_win_set_cursor(graph_win, {next_line, 0})
+    end, opts)
+    
+    vim.keymap.set('n', 'k', function()
+        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
+        local prev_line = find_interactive_line(interactive_lines, current_line, -1)
+        vim.api.nvim_win_set_cursor(graph_win, {prev_line, 0})
+    end, opts)
+    
+    vim.keymap.set('n', '<Down>', function()
+        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
+        local next_line = find_interactive_line(interactive_lines, current_line, 1)
+        vim.api.nvim_win_set_cursor(graph_win, {next_line, 0})
+    end, opts)
+    
+    vim.keymap.set('n', '<Up>', function()
+        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
+        local prev_line = find_interactive_line(interactive_lines, current_line, -1)
+        vim.api.nvim_win_set_cursor(graph_win, {prev_line, 0})
+    end, opts)
+    
+    vim.keymap.set('n', '<CR>', function()
+        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
+        local line_data = interactive_lines[current_line]
+        
+        if line_data and line_data.interactive and line_data.filename then
+            M.toggle_visual_graph()
+            local file_path = find_markdown_file(line_data.filename)
+            if file_path then
+                add_current_to_history()
+                vim.cmd("edit " .. vim.fn.fnameescape(file_path))
+            else
+                vim.notify("File not found: " .. line_data.filename, vim.log.levels.WARN)
+            end
+        end
+    end, opts)
+    
+    vim.cmd('normal! gg')
+    local first_interactive = find_interactive_line(interactive_lines, 1, 1)
+    if first_interactive then
+        vim.api.nvim_win_set_cursor(graph_win, {first_interactive, 0})
+    end
+end
+
 --- Toggle the interactive graph view
 function M.toggle_graph()
     if graph_win and vim.api.nvim_win_is_valid(graph_win) then
@@ -875,6 +1156,7 @@ function M.setup(opts)
     vim.api.nvim_create_user_command('PebbleBack', M.go_back, { desc = 'Go back in navigation history' })
     vim.api.nvim_create_user_command('PebbleForward', M.go_forward, { desc = 'Go forward in navigation history' })
     vim.api.nvim_create_user_command('PebbleGraph', M.toggle_graph, { desc = 'Toggle link graph view' })
+    vim.api.nvim_create_user_command('PebbleVisualGraph', M.toggle_visual_graph, { desc = 'Toggle enhanced visual graph view' })
     vim.api.nvim_create_user_command('PebbleHistory', M.show_history, { desc = 'Show navigation history' })
     vim.api.nvim_create_user_command('PebbleStats', M.show_cache_stats, { desc = 'Show cache statistics' })
     vim.api.nvim_create_user_command('PebbleCreateLinkAndNavigate', function()
@@ -892,6 +1174,8 @@ function M.setup(opts)
                 vim.keymap.set("n", "<CR>", M.follow_link, vim.tbl_extend("force", buf_opts, { desc = "Follow markdown link" }))
                 vim.keymap.set("n", "<Tab>", M.next_link, vim.tbl_extend("force", buf_opts, { desc = "Next markdown link" }))
                 vim.keymap.set("n", "<S-Tab>", M.prev_link, vim.tbl_extend("force", buf_opts, { desc = "Previous markdown link" }))
+                vim.keymap.set("n", "<leader>mg", M.toggle_graph, vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown graph" }))
+                vim.keymap.set("n", "<leader>mv", M.toggle_visual_graph, vim.tbl_extend("force", buf_opts, { desc = "Toggle visual markdown graph" }))
                 vim.keymap.set("v", "<leader>mc", M.create_link_and_navigate, vim.tbl_extend("force", buf_opts, { desc = "Create link, file and navigate" }))
                 vim.keymap.set("v", "<leader>ml", M.create_link_and_file, vim.tbl_extend("force", buf_opts, { desc = "Create link and file" }))
             end
@@ -900,6 +1184,7 @@ function M.setup(opts)
     
     if opts.global_keymaps then
         vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
+        vim.keymap.set("n", "<leader>mv", M.toggle_visual_graph, { desc = "Toggle visual markdown graph" })
         vim.keymap.set("n", "<leader>mb", M.go_back, { desc = "Go back in markdown history" })
         vim.keymap.set("n", "<leader>mf", M.go_forward, { desc = "Go forward in markdown history" })
     end
