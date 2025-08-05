@@ -52,6 +52,7 @@ use {
 
 ### Graph View
 - Press `:PebbleGraph` to open the interactive graph
+- Press `:PebbleVisualGraph` to open the enhanced visual graph with ASCII art
 - Use `j/k` or arrow keys to navigate
 - Press `<CR>` to open a file
 - Press `q` or `<Esc>` to close
@@ -66,6 +67,7 @@ use {
 | `:PebbleBack` | Go back in history |
 | `:PebbleForward` | Go forward in history |
 | `:PebbleGraph` | Toggle graph view |
+| `:PebbleVisualGraph` | Toggle enhanced visual graph view |
 | `:PebbleHistory` | Show navigation history |
 | `:PebbleStats` | Show cache statistics |
 | `:PebbleCreateLinkAndNavigate` | Create link, file and navigate (visual mode) |
@@ -77,12 +79,15 @@ use {
 - `<CR>` - Follow link under cursor
 - `<Tab>` - Next link in buffer
 - `<S-Tab>` - Previous link in buffer
+- `<leader>mg` - Toggle graph view
+- `<leader>mv` - Toggle visual graph view
 - `<leader>mc` - Create link, file and navigate (visual mode)
 - `<leader>ml` - Create link and file without navigation (visual mode)
 
 ### Optional Global Keymaps
 Set `global_keymaps = true` in setup to enable:
 - `<leader>mg` - Toggle graph view
+- `<leader>mv` - Toggle visual graph view
 - `<leader>mb` - Go back in history
 - `<leader>mf` - Go forward in history
 
@@ -109,6 +114,7 @@ require('pebble').setup({
 -- Set custom keymaps
 vim.keymap.set('n', 'gf', require('pebble').follow_link, { desc = 'Follow link' })
 vim.keymap.set('n', '<leader>gg', require('pebble').toggle_graph, { desc = 'Toggle graph' })
+vim.keymap.set('n', '<leader>gv', require('pebble').toggle_visual_graph, { desc = 'Toggle visual graph' })
 vim.keymap.set('v', '<leader>cl', require('pebble').create_link_and_navigate, { desc = 'Create link and navigate' })
 vim.keymap.set('v', '<leader>cf', require('pebble').create_link_and_file, { desc = 'Create link and file' })
 ```
@@ -118,7 +124,7 @@ Enable global keymaps for non-markdown files:
 
 ```lua
 require('pebble').setup({
-    global_keymaps = true  -- Enables <leader>mg, <leader>mb, <leader>mf globally
+    global_keymaps = true  -- Enables <leader>mg, <leader>mv, <leader>mb, <leader>mf globally
 })
 ```
 

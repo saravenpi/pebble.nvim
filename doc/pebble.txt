@@ -83,6 +83,7 @@ Basic usage:
 *:PebbleBack*          Go back in navigation history
 *:PebbleForward*       Go forward in navigation history
 *:PebbleGraph*         Toggle interactive link graph view
+*:PebbleVisualGraph*   Toggle enhanced visual graph view with ASCII art
 *:PebbleHistory*       Show navigation history (debug)
 *:PebbleStats*         Show cache performance statistics
 *:PebbleCreateLinkAndNavigate* Create link, file and navigate (visual mode)
@@ -96,12 +97,15 @@ Default keymaps (markdown files only):
 *<CR>*           Follow link under cursor
 *<Tab>*          Next link in buffer  
 *<S-Tab>*        Previous link in buffer
+*<leader>mg*     Toggle graph view
+*<leader>mv*     Toggle visual graph view
 *<leader>mc*     Create link, file and navigate (visual mode)
 *<leader>ml*     Create link and file without navigation (visual mode)
 
 Optional global keymaps (disabled by default):
 
 *<leader>mg*     Toggle link graph
+*<leader>mv*     Toggle visual graph view
 *<leader>mb*     Go back in history
 *<leader>mf*     Go forward in history
 
@@ -149,7 +153,8 @@ Navigation Features:
 • Visual selection to link conversion
 
 Graph View Features:
-• Clean, borderless design
+• Clean, borderless design (standard graph)
+• Enhanced visual graph with ASCII art boxes and connections
 • Interactive navigation with j/k or arrows
 • Shows incoming/outgoing links
 • Highlights missing files
