@@ -498,6 +498,84 @@ local function find_links_in_file(file_path)
     return links
 end
 
+--- Build a comprehensive graph with depth 3 connections between markdown files
+local function build_comprehensive_graph(current_name, max_depth)
+    max_depth = max_depth or 3
+    local graph = {}
+    local processed = {}
+    local to_process = {{name = current_name, level = 0}}
+    
+    if not cache_valid then
+        build_file_cache()
+    end
+    
+    -- Initialize current file
+    local current_file = vim.api.nvim_buf_get_name(0)
+    graph[current_name] = {
+        file_path = current_file,
+        outgoing = {},
+        incoming = {},
+        level = 0
+    }
+    
+    while #to_process > 0 do
+        local current = table.remove(to_process, 1)
+        local name, level = current.name, current.level
+        
+        if processed[name] or level > max_depth then
+            goto continue
+        end
+        
+        processed[name] = true
+        
+        -- Get file path for this node
+        local file_path = name == current_name and current_file or find_markdown_file(name)
+        if not file_path then
+            goto continue
+        end
+        
+        -- Initialize node if not exists
+        if not graph[name] then
+            graph[name] = {
+                file_path = file_path,
+                outgoing = {},
+                incoming = {},
+                level = level
+            }
+        end
+        
+        -- Find all outgoing links from this file
+        local links = find_links_in_file(file_path)
+        for _, link in ipairs(links) do
+            if link ~= name then -- Avoid self-references
+                -- Initialize target node
+                if not graph[link] then
+                    local target_file = find_markdown_file(link)
+                    graph[link] = {
+                        file_path = target_file,
+                        outgoing = {},
+                        incoming = {},
+                        level = level + 1
+                    }
+                end
+                
+                -- Create bidirectional relationship
+                graph[name].outgoing[link] = true
+                graph[link].incoming[name] = true
+                
+                -- Add to processing queue if not too deep
+                if level < max_depth and not processed[link] then
+                    table.insert(to_process, {name = link, level = level + 1})
+                end
+            end
+        end
+        
+        ::continue::
+    end
+    
+    return graph
+end
+
 --- Build a graph of connections between markdown files with caching
 local function build_link_graph()
     local current_file = vim.api.nvim_buf_get_name(0)
@@ -511,74 +589,14 @@ local function build_link_graph()
         return cached_graph.graph, current_name
     end
     
-    if not cache_valid then
-        build_file_cache()
-    end
-    
-    local graph = {}
-    
-    graph[current_name] = {
-        file_path = current_file,
-        outgoing = {},
-        incoming = {},
-        level = 0
-    }
-    
-    local outgoing_links = find_links_in_file(current_file)
-    local outgoing_set = {}
-    
-    for _, link in ipairs(outgoing_links) do
-        if not outgoing_set[link] then
-            outgoing_set[link] = true
-            graph[current_name].outgoing[link] = true
-            
-            if not graph[link] then
-                local file_path = find_markdown_file(link)
-                graph[link] = {
-                    file_path = file_path,
-                    outgoing = {},
-                    incoming = {},
-                    level = 1
-                }
-            end
-            graph[link].incoming[current_name] = true
-        end
-    end
-    
-    local files_scanned = 0
-    for filename, file_paths in pairs(file_cache) do
-        if files_scanned >= MAX_FILES_TO_SCAN then
-            break
-        end
-        
-        if filename ~= current_name then
-            files_scanned = files_scanned + 1
-            local file_path = file_paths[1]
-            local links = find_links_in_file(file_path)
-            
-            for _, link in ipairs(links) do
-                if link == current_name then
-                    if not graph[filename] then
-                        graph[filename] = {
-                            file_path = file_path,
-                            outgoing = {},
-                            incoming = {},
-                            level = -1
-                        }
-                    end
-                    graph[filename].outgoing[current_name] = true
-                    graph[current_name].incoming[filename] = true
-                    break
-                end
-            end
-        end
-    end
+    local graph = build_comprehensive_graph(current_name, 3)
     
     graph_cache[cache_key] = {
         graph = graph,
         timestamp = now
     }
     
+    -- Clean old cache entries
     for key, cached in pairs(graph_cache) do
         if (now - cached.timestamp) > (GRAPH_CACHE_TTL * 2) then
             graph_cache[key] = nil
@@ -756,7 +774,7 @@ local function find_interactive_line(interactive_lines, current_line, direction)
     return lines[current_idx]
 end
 
---- Create enhanced visual ASCII graph with boxes and connections
+--- Create clear ASCII graph showing connections with depth 3
 local function create_visual_graph_text(graph, current_name)
     local lines = {}
     local interactive_lines = {}
@@ -769,155 +787,232 @@ local function create_visual_graph_text(graph, current_name)
         }
     end
     
-    -- Calculate optimal dimensions based on content
-    local function calculate_dimensions(files, current_name)
-        local max_filename_length = string.len(current_name) + 4  -- Add space for "● " and " ●"
-        
-        for _, file in ipairs(files) do
-            local display_text = file
-            if not (graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1) then
-                display_text = file .. " (missing)"
+    -- Organize files by their connection depth from current file
+    local depth_0 = {current_name}  -- Current file
+    local depth_1 = {}              -- Direct connections
+    local depth_2 = {}              -- 2-hop connections
+    local depth_3 = {}              -- 3-hop connections
+    
+    -- Get direct connections (depth 1)
+    if graph[current_name] then
+        for file, _ in pairs(graph[current_name].outgoing) do
+            if not vim.tbl_contains(depth_1, file) then
+                table.insert(depth_1, file)
             end
-            max_filename_length = math.max(max_filename_length, string.len(display_text))
         end
-        
-        -- Ensure minimum width and add padding
-        local box_width = math.max(20, math.min(50, max_filename_length + 6))
-        local total_width = math.max(65, box_width + 20)
-        
-        return box_width, total_width
+        for file, _ in pairs(graph[current_name].incoming) do
+            if not vim.tbl_contains(depth_1, file) then
+                table.insert(depth_1, file)
+            end
+        end
     end
     
-    local function create_box(text, width, center_pos)
-        local content_width = width - 4
-        local truncated = string.len(text) > content_width and string.sub(text, 1, content_width - 3) .. "..." or text
+    -- Get 2-hop connections (depth 2)
+    for _, file1 in ipairs(depth_1) do
+        if graph[file1] then
+            for file2, _ in pairs(graph[file1].outgoing) do
+                if file2 ~= current_name and not vim.tbl_contains(depth_1, file2) and not vim.tbl_contains(depth_2, file2) then
+                    table.insert(depth_2, file2)
+                end
+            end
+            for file2, _ in pairs(graph[file1].incoming) do
+                if file2 ~= current_name and not vim.tbl_contains(depth_1, file2) and not vim.tbl_contains(depth_2, file2) then
+                    table.insert(depth_2, file2)
+                end
+            end
+        end
+    end
+    
+    -- Get 3-hop connections (depth 3)
+    for _, file2 in ipairs(depth_2) do
+        if graph[file2] then
+            for file3, _ in pairs(graph[file2].outgoing) do
+                if file3 ~= current_name and 
+                   not vim.tbl_contains(depth_1, file3) and 
+                   not vim.tbl_contains(depth_2, file3) and 
+                   not vim.tbl_contains(depth_3, file3) then
+                    table.insert(depth_3, file3)
+                end
+            end
+            for file3, _ in pairs(graph[file2].incoming) do
+                if file3 ~= current_name and 
+                   not vim.tbl_contains(depth_1, file3) and 
+                   not vim.tbl_contains(depth_2, file3) and 
+                   not vim.tbl_contains(depth_3, file3) then
+                    table.insert(depth_3, file3)
+                end
+            end
+        end
+    end
+    
+    -- Sort all depths
+    table.sort(depth_1)
+    table.sort(depth_2)
+    table.sort(depth_3)
+    
+    -- Calculate layout
+    local max_width = 0
+    local all_files = {}
+    vim.list_extend(all_files, depth_0)
+    vim.list_extend(all_files, depth_1)
+    vim.list_extend(all_files, depth_2)
+    vim.list_extend(all_files, depth_3)
+    
+    for _, file in ipairs(all_files) do
+        local display_name = file
+        if graph[file] and not (graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1) then
+            display_name = file .. " (!)"
+        end
+        max_width = math.max(max_width, string.len(display_name))
+    end
+    
+    local box_width = math.min(30, math.max(15, max_width + 4))
+    local total_width = math.max(80, box_width + 40)
+    local center = math.floor(total_width / 2)
+    
+    local function create_file_box(filename, is_current)
+        local exists = graph[filename] and graph[filename].file_path and vim.fn.filereadable(graph[filename].file_path) == 1
+        local display_name = exists and filename or (filename .. " (!)")
+        
+        local content_width = box_width - 4
+        local truncated = string.len(display_name) > content_width and 
+                         string.sub(display_name, 1, content_width - 3) .. "..." or display_name
         local padding = content_width - string.len(truncated)
         local left_pad = math.floor(padding / 2)
         local right_pad = padding - left_pad
         
-        local left_margin = center_pos - math.floor(width / 2)
-        local margin_str = string.rep(" ", math.max(0, left_margin))
+        local box_start = center - math.floor(box_width / 2)
+        local margin = string.rep(" ", math.max(0, box_start))
         
-        local top_line = margin_str .. "┌" .. string.rep("─", width - 2) .. "┐"
-        local content_line = margin_str .. "│ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " │"
-        local bottom_line = margin_str .. "└" .. string.rep("─", width - 2) .. "┘"
-        
-        return {top_line, content_line, bottom_line}
+        if is_current then
+            return {
+                margin .. "╔" .. string.rep("═", box_width - 2) .. "╗",
+                margin .. "║ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " ║",
+                margin .. "╚" .. string.rep("═", box_width - 2) .. "╝"
+            }
+        else
+            return {
+                margin .. "┌" .. string.rep("─", box_width - 2) .. "┐",
+                margin .. "│ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " │",
+                margin .. "└" .. string.rep("─", box_width - 2) .. "┘"
+            }
+        end
     end
     
-    local function create_connection_line(center_pos, symbol)
-        local margin_str = string.rep(" ", math.max(0, center_pos))
-        return margin_str .. symbol
+    local function create_connection_line(from_file, to_file, symbol)
+        local margin = string.rep(" ", center)
+        return margin .. symbol
     end
     
-    local incoming_files = {}
-    local outgoing_files = {}
-    
-    for file, _ in pairs(graph[current_name].incoming) do
-        table.insert(incoming_files, file)
-    end
-    table.sort(incoming_files)
-    
-    for file, _ in pairs(graph[current_name].outgoing) do
-        table.insert(outgoing_files, file)
-    end
-    table.sort(outgoing_files)
-    
-    -- Calculate dimensions based on all content
-    local all_files = {}
-    for _, file in ipairs(incoming_files) do table.insert(all_files, file) end
-    for _, file in ipairs(outgoing_files) do table.insert(all_files, file) end
-    
-    local box_width, total_width = calculate_dimensions(all_files, current_name)
-    local center_pos = math.floor(total_width / 2)
-    
-    -- Create dynamic header
-    local header_text = "Pebble Visual Graph"
-    local header_padding = total_width - string.len(header_text) - 4
-    local header_left_pad = math.floor(header_padding / 2)
-    local header_right_pad = header_padding - header_left_pad
-    
+    -- Build the graph
     add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
-    add_line("║" .. string.rep(" ", header_left_pad) .. header_text .. string.rep(" ", header_right_pad) .. "║", false)
+    add_line("║" .. string.rep(" ", math.floor((total_width - 21) / 2)) .. "Pebble Link Network" .. string.rep(" ", math.ceil((total_width - 21) / 2) - 2) .. "║", false)
     add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
     add_line("", false)
     
-    -- Incoming files section
-    if #incoming_files > 0 then
-        local section_text = "INCOMING LINKS"
-        local section_margin = center_pos - math.floor(string.len(section_text) / 2) - 1
-        add_line(string.rep(" ", math.max(0, section_margin)) .. "┌─ " .. section_text .. " ─┐", false)
+    -- Show depth 3 files (if any)
+    if #depth_3 > 0 then
+        local depth_label = "◦◦◦ DEPTH 3 ◦◦◦"
+        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
         add_line("", false)
         
-        for i, file in ipairs(incoming_files) do
+        for i, file in ipairs(depth_3) do
             local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-            local display_text = exists and file or (file .. " (missing)")
-            local box_lines = create_box(display_text, box_width, center_pos)
+            local box = create_file_box(file, false)
+            add_line(box[1], exists, exists and file or nil)
+            add_line(box[2], exists, exists and file or nil)
+            add_line(box[3], exists, exists and file or nil)
             
-            add_line(box_lines[1], exists, exists and file or nil)
-            add_line(box_lines[2], exists, exists and file or nil)
-            add_line(box_lines[3], exists, exists and file or nil)
-            
-            if i < #incoming_files then
-                add_line(create_connection_line(center_pos, "│"), false)
-                add_line(create_connection_line(center_pos, "▼"), false)
+            if i < #depth_3 then
+                add_line(create_connection_line(file, depth_3[i+1], "│"), false)
             else
-                add_line(create_connection_line(center_pos, "│"), false)
-                add_line(create_connection_line(center_pos, "▼"), false)
+                add_line(create_connection_line(file, "", "│"), false)
+                add_line(create_connection_line(file, "", "▼"), false)
             end
         end
         add_line("", false)
     end
     
-    -- Current file (always centered)
-    local current_display = "● " .. current_name .. " ●"
-    local current_box_width = math.max(box_width, string.len(current_display) + 6)
-    local current_box = create_box(current_display, current_box_width, center_pos)
+    -- Show depth 2 files (if any)
+    if #depth_2 > 0 then
+        local depth_label = "◦◦ DEPTH 2 ◦◦"
+        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
+        add_line("", false)
+        
+        for i, file in ipairs(depth_2) do
+            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
+            local box = create_file_box(file, false)
+            add_line(box[1], exists, exists and file or nil)
+            add_line(box[2], exists, exists and file or nil)
+            add_line(box[3], exists, exists and file or nil)
+            
+            if i < #depth_2 then
+                add_line(create_connection_line(file, depth_2[i+1], "│"), false)
+            else
+                add_line(create_connection_line(file, "", "│"), false)
+                add_line(create_connection_line(file, "", "▼"), false)
+            end
+        end
+        add_line("", false)
+    end
+    
+    -- Show depth 1 files (direct connections)
+    if #depth_1 > 0 then
+        local depth_label = "◦ DEPTH 1 ◦"
+        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
+        add_line("", false)
+        
+        for i, file in ipairs(depth_1) do
+            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
+            local box = create_file_box(file, false)
+            add_line(box[1], exists, exists and file or nil)
+            add_line(box[2], exists, exists and file or nil)
+            add_line(box[3], exists, exists and file or nil)
+            
+            -- Show connection indicators
+            local conn_indicators = {}
+            if graph[current_name] and graph[current_name].outgoing[file] then
+                table.insert(conn_indicators, "→")
+            end
+            if graph[current_name] and graph[current_name].incoming[file] then
+                table.insert(conn_indicators, "←")
+            end
+            if #conn_indicators > 0 then
+                local conn_str = table.concat(conn_indicators, " ")
+                add_line(string.rep(" ", center - math.floor(string.len(conn_str) / 2)) .. conn_str, false)
+            end
+            
+            if i < #depth_1 then
+                add_line(create_connection_line(file, depth_1[i+1], "│"), false)
+            else
+                add_line(create_connection_line(file, "", "│"), false)
+                add_line(create_connection_line(file, "", "▼"), false)
+            end
+        end
+        add_line("", false)
+    end
+    
+    -- Show current file
+    local current_label = "● CURRENT FILE ●"
+    add_line(string.rep(" ", center - math.floor(string.len(current_label) / 2)) .. current_label, false)
+    add_line("", false)
+    
+    local current_box = create_file_box(current_name, true)
     add_line(current_box[1], false)
     add_line(current_box[2], false)
     add_line(current_box[3], false)
+    
     add_line("", false)
     
-    -- Outgoing files section
-    if #outgoing_files > 0 then
-        add_line(create_connection_line(center_pos, "│"), false)
-        add_line(create_connection_line(center_pos, "▼"), false)
-        
-        local section_text = "OUTGOING LINKS"
-        local section_margin = center_pos - math.floor(string.len(section_text) / 2) - 1
-        add_line(string.rep(" ", math.max(0, section_margin)) .. "┌─ " .. section_text .. " ─┐", false)
-        add_line("", false)
-        
-        for i, file in ipairs(outgoing_files) do
-            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-            local display_text = exists and file or (file .. " (missing)")
-            local box_lines = create_box(display_text, box_width, center_pos)
-            
-            add_line(box_lines[1], exists, exists and file or nil)
-            add_line(box_lines[2], exists, exists and file or nil)
-            add_line(box_lines[3], exists, exists and file or nil)
-            
-            if i < #outgoing_files then
-                add_line(create_connection_line(center_pos, "│"), false)
-                add_line(create_connection_line(center_pos, "▼"), false)
-            end
-        end
-        add_line("", false)
-    end
-    
-    -- Footer with stats
-    local total_files = 0
-    for _ in pairs(graph) do total_files = total_files + 1 end
-    
-    local stats_text = "Files: " .. total_files .. " │ Out: " .. #outgoing_files .. " │ In: " .. #incoming_files
-    local help_text = "↑/↓: Navigate │ Enter: Open │ q: Close"
-    
-    local stats_padding = total_width - string.len(stats_text) - 4
-    local help_padding = total_width - string.len(help_text) - 4
+    -- Connection summary
+    local total_files = #all_files
+    local direct_connections = #depth_1
+    local summary = string.format("Network: %d files │ Direct: %d │ Max depth: 3", total_files, direct_connections)
+    local help = "↑/↓: Navigate │ Enter: Open │ q: Close"
     
     add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
-    add_line("║ " .. stats_text .. string.rep(" ", math.max(0, stats_padding)) .. " ║", false)
-    add_line("║ " .. help_text .. string.rep(" ", math.max(0, help_padding)) .. " ║", false)
+    add_line("║ " .. summary .. string.rep(" ", total_width - string.len(summary) - 4) .. " ║", false)
+    add_line("║ " .. help .. string.rep(" ", total_width - string.len(help) - 4) .. " ║", false)
     add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
     
     return lines, interactive_lines
