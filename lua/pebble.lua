@@ -1028,7 +1028,13 @@ function M.setup(opts)
 				)
 				vim.keymap.set(
 					{ "n", "i" },
-					"<C-@>",
+					"<C-t>",
+					M.toggle_checklist,
+					vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown checklist" })
+				)
+				vim.keymap.set(
+					{ "n", "i" },
+					"<leader>mt",
 					M.toggle_checklist,
 					vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown checklist" })
 				)

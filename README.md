@@ -80,7 +80,7 @@ use {
 - `<CR>` - Follow link under cursor
 - `<Tab>` - Next link in buffer
 - `<S-Tab>` - Previous link in buffer
-- `<Ctrl+@>` - Toggle markdown checklist/todo item
+- `<Ctrl+t>` or `<leader>mt` - Toggle markdown checklist/todo item
 - `<leader>mg` - Toggle graph view
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mc` - Create link, file and navigate (visual mode)
