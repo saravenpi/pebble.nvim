@@ -382,6 +382,53 @@ function M.show_cache_stats()
     end
 end
 
+--- Toggle markdown checklist/todo items on current line
+function M.toggle_checklist()
+    local line_num = vim.api.nvim_win_get_cursor(0)[1]
+    local line = vim.api.nvim_get_current_line()
+    
+    local patterns = {
+        { pattern = "^(%s*)%- %[ %] (.*)$", replacement = "%1- [x] %2" },
+        { pattern = "^(%s*)%- %[x%] (.*)$", replacement = "%1- [ ] %2" },
+        { pattern = "^(%s*)%- %[X%] (.*)$", replacement = "%1- [ ] %2" },
+        { pattern = "^(%s*)%* %[ %] (.*)$", replacement = "%1* [x] %2" },
+        { pattern = "^(%s*)%* %[x%] (.*)$", replacement = "%1* [ ] %2" },
+        { pattern = "^(%s*)%* %[X%] (.*)$", replacement = "%1* [ ] %2" },
+        { pattern = "^(%s*)(%d+%.) %[ %] (.*)$", replacement = "%1%2 [x] %3" },
+        { pattern = "^(%s*)(%d+%.) %[x%] (.*)$", replacement = "%1%2 [ ] %3" },
+        { pattern = "^(%s*)(%d+%.) %[X%] (.*)$", replacement = "%1%2 [ ] %3" },
+    }
+    
+    for _, p in ipairs(patterns) do
+        local new_line = line:gsub(p.pattern, p.replacement)
+        if new_line ~= line then
+            vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, {new_line})
+            return
+        end
+    end
+    
+    local create_patterns = {
+        { pattern = "^(%s*)%- (.*)$", replacement = "%1- [ ] %2" },
+        { pattern = "^(%s*)%* (.*)$", replacement = "%1* [ ] %2" },
+        { pattern = "^(%s*)(%d+%.) (.*)$", replacement = "%1%2 [ ] %3" },
+    }
+    
+    for _, p in ipairs(create_patterns) do
+        local new_line = line:gsub(p.pattern, p.replacement)
+        if new_line ~= line then
+            vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, {new_line})
+            return
+        end
+    end
+    
+    local indent = line:match("^(%s*)")
+    local content = line:match("^%s*(.*)$")
+    if content and content ~= "" then
+        local new_line = indent .. "- [ ] " .. content
+        vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, {new_line})
+    end
+end
+
 --- Extract text from current visual selection
 local function get_visual_selection()
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'nx', false)
@@ -928,6 +975,7 @@ function M.setup(opts)
     vim.api.nvim_create_user_command('PebbleGraph', M.toggle_graph, { desc = 'Toggle link graph view' })
     vim.api.nvim_create_user_command('PebbleHistory', M.show_history, { desc = 'Show navigation history' })
     vim.api.nvim_create_user_command('PebbleStats', M.show_cache_stats, { desc = 'Show cache statistics' })
+    vim.api.nvim_create_user_command('PebbleToggleChecklist', M.toggle_checklist, { desc = 'Toggle markdown checklist/todo item' })
     vim.api.nvim_create_user_command('PebbleCreateLinkAndNavigate', function()
         vim.notify("Select text in visual mode first", vim.log.levels.WARN)
     end, { desc = 'Create link, file and navigate (use in visual mode)' })
@@ -944,6 +992,7 @@ function M.setup(opts)
                 vim.keymap.set("n", "<Tab>", M.next_link, vim.tbl_extend("force", buf_opts, { desc = "Next markdown link" }))
                 vim.keymap.set("n", "<S-Tab>", M.prev_link, vim.tbl_extend("force", buf_opts, { desc = "Previous markdown link" }))
                 vim.keymap.set("n", "<leader>mg", M.toggle_graph, vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown graph" }))
+                vim.keymap.set("n", "<C-Space>", M.toggle_checklist, vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown checklist" }))
                 vim.keymap.set("v", "<leader>mc", M.create_link_and_navigate, vim.tbl_extend("force", buf_opts, { desc = "Create link, file and navigate" }))
                 vim.keymap.set("v", "<leader>ml", M.create_link_and_file, vim.tbl_extend("force", buf_opts, { desc = "Create link and file" }))
             end

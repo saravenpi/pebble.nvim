@@ -70,6 +70,7 @@ use {
 | `:PebbleVisualGraph` | Toggle enhanced visual graph view |
 | `:PebbleHistory` | Show navigation history |
 | `:PebbleStats` | Show cache statistics |
+| `:PebbleToggleChecklist` | Toggle markdown checklist/todo item |
 | `:PebbleCreateLinkAndNavigate` | Create link, file and navigate (visual mode) |
 | `:PebbleCreateLinkAndFile` | Create link and file without navigation (visual mode) |
 
@@ -79,6 +80,7 @@ use {
 - `<CR>` - Follow link under cursor
 - `<Tab>` - Next link in buffer
 - `<S-Tab>` - Previous link in buffer
+- `<Ctrl+Space>` - Toggle markdown checklist/todo item
 - `<leader>mg` - Toggle graph view
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mc` - Create link, file and navigate (visual mode)
