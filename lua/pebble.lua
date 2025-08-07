@@ -165,11 +165,26 @@ end
 
 --- Create a new markdown file with the given name and title
 local function create_new_file(link, title)
-    local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-    local root_dir = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
+    -- First check if file already exists anywhere to prevent duplicates
+    local existing_file = find_markdown_file(link)
+    if existing_file then
+        return existing_file
+    end
     
-    local new_file_path = root_dir .. "/" .. link .. ".md"
+    -- Get current buffer's directory, fallback to git root, then cwd
+    local current_file = vim.api.nvim_buf_get_name(0)
+    local target_dir
     
+    if current_file and current_file ~= "" and current_file:match("%.md$") then
+        target_dir = vim.fn.fnamemodify(current_file, ":h")
+    else
+        local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
+        target_dir = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
+    end
+    
+    local new_file_path = target_dir .. "/" .. link .. ".md"
+    
+    -- Double-check file doesn't exist at target location
     if vim.fn.filereadable(new_file_path) == 1 then
         return new_file_path
     end
