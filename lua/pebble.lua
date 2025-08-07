@@ -89,6 +89,21 @@ local function find_markdown_file(filename)
     local search_name = filename:gsub("%.md$", "")
     local matches = file_cache[search_name]
     if matches and #matches > 0 then
+        -- Prioritize files in the same directory as the current buffer
+        local current_file = vim.api.nvim_buf_get_name(0)
+        if current_file and current_file ~= "" and current_file:match("%.md$") then
+            local current_dir = vim.fn.fnamemodify(current_file, ":h")
+            
+            -- First, look for a file in the same directory
+            for _, file_path in ipairs(matches) do
+                local file_dir = vim.fn.fnamemodify(file_path, ":h")
+                if file_dir == current_dir then
+                    return file_path
+                end
+            end
+        end
+        
+        -- If no file found in current directory, return the first match
         return matches[1]
     end
     
@@ -789,363 +804,8 @@ local function find_interactive_line(interactive_lines, current_line, direction)
     return lines[current_idx]
 end
 
---- Create clear ASCII graph showing connections with depth 3
-local function create_visual_graph_text(graph, current_name)
-    local lines = {}
-    local interactive_lines = {}
-    
-    local function add_line(content, is_interactive, filename)
-        lines[#lines + 1] = content
-        interactive_lines[#lines] = {
-            interactive = is_interactive or false,
-            filename = filename
-        }
-    end
-    
-    -- Organize files by their connection depth from current file
-    local depth_0 = {current_name}  -- Current file
-    local depth_1 = {}              -- Direct connections
-    local depth_2 = {}              -- 2-hop connections
-    local depth_3 = {}              -- 3-hop connections
-    
-    -- Get direct connections (depth 1)
-    if graph[current_name] then
-        for file, _ in pairs(graph[current_name].outgoing) do
-            if not vim.tbl_contains(depth_1, file) then
-                table.insert(depth_1, file)
-            end
-        end
-        for file, _ in pairs(graph[current_name].incoming) do
-            if not vim.tbl_contains(depth_1, file) then
-                table.insert(depth_1, file)
-            end
-        end
-    end
-    
-    -- Get 2-hop connections (depth 2)
-    for _, file1 in ipairs(depth_1) do
-        if graph[file1] then
-            for file2, _ in pairs(graph[file1].outgoing) do
-                if file2 ~= current_name and not vim.tbl_contains(depth_1, file2) and not vim.tbl_contains(depth_2, file2) then
-                    table.insert(depth_2, file2)
-                end
-            end
-            for file2, _ in pairs(graph[file1].incoming) do
-                if file2 ~= current_name and not vim.tbl_contains(depth_1, file2) and not vim.tbl_contains(depth_2, file2) then
-                    table.insert(depth_2, file2)
-                end
-            end
-        end
-    end
-    
-    -- Get 3-hop connections (depth 3)
-    for _, file2 in ipairs(depth_2) do
-        if graph[file2] then
-            for file3, _ in pairs(graph[file2].outgoing) do
-                if file3 ~= current_name and 
-                   not vim.tbl_contains(depth_1, file3) and 
-                   not vim.tbl_contains(depth_2, file3) and 
-                   not vim.tbl_contains(depth_3, file3) then
-                    table.insert(depth_3, file3)
-                end
-            end
-            for file3, _ in pairs(graph[file2].incoming) do
-                if file3 ~= current_name and 
-                   not vim.tbl_contains(depth_1, file3) and 
-                   not vim.tbl_contains(depth_2, file3) and 
-                   not vim.tbl_contains(depth_3, file3) then
-                    table.insert(depth_3, file3)
-                end
-            end
-        end
-    end
-    
-    -- Sort all depths
-    table.sort(depth_1)
-    table.sort(depth_2)
-    table.sort(depth_3)
-    
-    -- Calculate layout
-    local max_width = 0
-    local all_files = {}
-    vim.list_extend(all_files, depth_0)
-    vim.list_extend(all_files, depth_1)
-    vim.list_extend(all_files, depth_2)
-    vim.list_extend(all_files, depth_3)
-    
-    for _, file in ipairs(all_files) do
-        local display_name = file
-        if graph[file] and not (graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1) then
-            display_name = file .. " (!)"
-        end
-        max_width = math.max(max_width, string.len(display_name))
-    end
-    
-    local box_width = math.min(30, math.max(15, max_width + 4))
-    local total_width = math.max(80, box_width + 40)
-    local center = math.floor(total_width / 2)
-    
-    local function create_file_box(filename, is_current)
-        local exists = graph[filename] and graph[filename].file_path and vim.fn.filereadable(graph[filename].file_path) == 1
-        local display_name = exists and filename or (filename .. " (!)")
-        
-        local content_width = box_width - 4
-        local truncated = string.len(display_name) > content_width and 
-                         string.sub(display_name, 1, content_width - 3) .. "..." or display_name
-        local padding = content_width - string.len(truncated)
-        local left_pad = math.floor(padding / 2)
-        local right_pad = padding - left_pad
-        
-        local box_start = center - math.floor(box_width / 2)
-        local margin = string.rep(" ", math.max(0, box_start))
-        
-        if is_current then
-            return {
-                margin .. "╔" .. string.rep("═", box_width - 2) .. "╗",
-                margin .. "║ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " ║",
-                margin .. "╚" .. string.rep("═", box_width - 2) .. "╝"
-            }
-        else
-            return {
-                margin .. "┌" .. string.rep("─", box_width - 2) .. "┐",
-                margin .. "│ " .. string.rep(" ", left_pad) .. truncated .. string.rep(" ", right_pad) .. " │",
-                margin .. "└" .. string.rep("─", box_width - 2) .. "┘"
-            }
-        end
-    end
-    
-    local function create_connection_line(from_file, to_file, symbol)
-        local margin = string.rep(" ", center)
-        return margin .. symbol
-    end
-    
-    -- Build the graph
-    add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
-    add_line("║" .. string.rep(" ", math.floor((total_width - 21) / 2)) .. "Pebble Link Network" .. string.rep(" ", math.ceil((total_width - 21) / 2) - 2) .. "║", false)
-    add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
-    add_line("", false)
-    
-    -- Show depth 3 files (if any)
-    if #depth_3 > 0 then
-        local depth_label = "◦◦◦ DEPTH 3 ◦◦◦"
-        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
-        add_line("", false)
-        
-        for i, file in ipairs(depth_3) do
-            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-            local box = create_file_box(file, false)
-            add_line(box[1], exists, exists and file or nil)
-            add_line(box[2], exists, exists and file or nil)
-            add_line(box[3], exists, exists and file or nil)
-            
-            if i < #depth_3 then
-                add_line(create_connection_line(file, depth_3[i+1], "│"), false)
-            else
-                add_line(create_connection_line(file, "", "│"), false)
-                add_line(create_connection_line(file, "", "▼"), false)
-            end
-        end
-        add_line("", false)
-    end
-    
-    -- Show depth 2 files (if any)
-    if #depth_2 > 0 then
-        local depth_label = "◦◦ DEPTH 2 ◦◦"
-        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
-        add_line("", false)
-        
-        for i, file in ipairs(depth_2) do
-            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-            local box = create_file_box(file, false)
-            add_line(box[1], exists, exists and file or nil)
-            add_line(box[2], exists, exists and file or nil)
-            add_line(box[3], exists, exists and file or nil)
-            
-            if i < #depth_2 then
-                add_line(create_connection_line(file, depth_2[i+1], "│"), false)
-            else
-                add_line(create_connection_line(file, "", "│"), false)
-                add_line(create_connection_line(file, "", "▼"), false)
-            end
-        end
-        add_line("", false)
-    end
-    
-    -- Show depth 1 files (direct connections)
-    if #depth_1 > 0 then
-        local depth_label = "◦ DEPTH 1 ◦"
-        add_line(string.rep(" ", center - math.floor(string.len(depth_label) / 2)) .. depth_label, false)
-        add_line("", false)
-        
-        for i, file in ipairs(depth_1) do
-            local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-            local box = create_file_box(file, false)
-            add_line(box[1], exists, exists and file or nil)
-            add_line(box[2], exists, exists and file or nil)
-            add_line(box[3], exists, exists and file or nil)
-            
-            -- Show connection indicators
-            local conn_indicators = {}
-            if graph[current_name] and graph[current_name].outgoing[file] then
-                table.insert(conn_indicators, "→")
-            end
-            if graph[current_name] and graph[current_name].incoming[file] then
-                table.insert(conn_indicators, "←")
-            end
-            if #conn_indicators > 0 then
-                local conn_str = table.concat(conn_indicators, " ")
-                add_line(string.rep(" ", center - math.floor(string.len(conn_str) / 2)) .. conn_str, false)
-            end
-            
-            if i < #depth_1 then
-                add_line(create_connection_line(file, depth_1[i+1], "│"), false)
-            else
-                add_line(create_connection_line(file, "", "│"), false)
-                add_line(create_connection_line(file, "", "▼"), false)
-            end
-        end
-        add_line("", false)
-    end
-    
-    -- Show current file
-    local current_label = "● CURRENT FILE ●"
-    add_line(string.rep(" ", center - math.floor(string.len(current_label) / 2)) .. current_label, false)
-    add_line("", false)
-    
-    local current_box = create_file_box(current_name, true)
-    add_line(current_box[1], false)
-    add_line(current_box[2], false)
-    add_line(current_box[3], false)
-    
-    add_line("", false)
-    
-    -- Connection summary
-    local total_files = #all_files
-    local direct_connections = #depth_1
-    local summary = string.format("Network: %d files │ Direct: %d │ Max depth: 3", total_files, direct_connections)
-    local help = "↑/↓: Navigate │ Enter: Open │ q: Close"
-    
-    add_line("╔" .. string.rep("═", total_width - 2) .. "╗", false)
-    add_line("║ " .. summary .. string.rep(" ", total_width - string.len(summary) - 4) .. " ║", false)
-    add_line("║ " .. help .. string.rep(" ", total_width - string.len(help) - 4) .. " ║", false)
-    add_line("╚" .. string.rep("═", total_width - 2) .. "╝", false)
-    
-    return lines, interactive_lines
-end
 
---- Set up syntax highlighting for the visual graph view
-local function setup_visual_graph_syntax(buf)
-    vim.api.nvim_buf_call(buf, function()
-        vim.cmd('syntax clear')
-        
-        vim.cmd('syntax match VisualGraphBorder /[╔╗╚╝═║┌┐└┘─│▼▲◄►]/') 
-        vim.cmd('syntax match VisualGraphTitle /Pebble Visual Graph/')
-        vim.cmd('syntax match VisualGraphCurrent /● .* ●/')
-        vim.cmd('syntax match VisualGraphSection /INCOMING LINKS\\|OUTGOING LINKS/')
-        vim.cmd('syntax match VisualGraphMissing /(missing)/')
-        vim.cmd('syntax match VisualGraphStats /Files:.*/')
-        vim.cmd('syntax match VisualGraphHelp /↑\\/↓:.*/')
-        
-        vim.cmd('highlight VisualGraphBorder guifg=#89b4fa ctermfg=117 gui=bold')
-        vim.cmd('highlight VisualGraphTitle guifg=#b4befe ctermfg=147 gui=bold')
-        vim.cmd('highlight VisualGraphCurrent guifg=#f9e2af ctermfg=221 gui=bold')
-        vim.cmd('highlight VisualGraphSection guifg=#a6e3a1 ctermfg=151 gui=bold')
-        vim.cmd('highlight VisualGraphMissing guifg=#f38ba8 ctermfg=210 gui=italic')
-        vim.cmd('highlight VisualGraphStats guifg=#cdd6f4 ctermfg=189')
-        vim.cmd('highlight VisualGraphHelp guifg=#6c7086 ctermfg=245 gui=italic')
-    end)
-end
 
---- Toggle the enhanced visual graph view
-function M.toggle_visual_graph()
-    if graph_win and vim.api.nvim_win_is_valid(graph_win) then
-        vim.api.nvim_win_close(graph_win, true)
-        if graph_buf and vim.api.nvim_buf_is_valid(graph_buf) then
-            vim.api.nvim_buf_delete(graph_buf, { force = true })
-        end
-        graph_win = nil
-        graph_buf = nil
-        return
-    end
-    
-    local graph, current_name = build_link_graph()
-    local graph_lines, interactive_lines = create_visual_graph_text(graph, current_name)
-    
-    graph_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_option(graph_buf, 'buftype', 'nofile')
-    vim.api.nvim_buf_set_option(graph_buf, 'bufhidden', 'wipe')
-    vim.api.nvim_buf_set_option(graph_buf, 'filetype', 'pebble-visual-graph')
-    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', false)
-    
-    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', true)
-    vim.api.nvim_buf_set_lines(graph_buf, 0, -1, false, graph_lines)
-    vim.api.nvim_buf_set_option(graph_buf, 'modifiable', false)
-    
-    setup_visual_graph_syntax(graph_buf)
-    
-    local height = math.min(#graph_lines + 2, math.floor(vim.o.lines * 0.6))
-    vim.cmd('botright ' .. height .. 'split')
-    graph_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(graph_win, graph_buf)
-    
-    vim.api.nvim_win_set_option(graph_win, 'wrap', false)
-    vim.api.nvim_win_set_option(graph_win, 'cursorline', true)
-    vim.api.nvim_win_set_option(graph_win, 'number', false)
-    vim.api.nvim_win_set_option(graph_win, 'relativenumber', false)
-    vim.api.nvim_win_set_option(graph_win, 'signcolumn', 'no')
-    vim.api.nvim_win_set_option(graph_win, 'cursorlineopt', 'both')
-    
-    local opts = { buffer = graph_buf, nowait = true, silent = true }
-    
-    vim.keymap.set('n', 'q', M.toggle_visual_graph, opts)
-    vim.keymap.set('n', '<ESC>', M.toggle_visual_graph, opts)
-    
-    vim.keymap.set('n', 'j', function()
-        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-        local next_line = find_interactive_line(interactive_lines, current_line, 1)
-        vim.api.nvim_win_set_cursor(graph_win, {next_line, 0})
-    end, opts)
-    
-    vim.keymap.set('n', 'k', function()
-        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-        local prev_line = find_interactive_line(interactive_lines, current_line, -1)
-        vim.api.nvim_win_set_cursor(graph_win, {prev_line, 0})
-    end, opts)
-    
-    vim.keymap.set('n', '<Down>', function()
-        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-        local next_line = find_interactive_line(interactive_lines, current_line, 1)
-        vim.api.nvim_win_set_cursor(graph_win, {next_line, 0})
-    end, opts)
-    
-    vim.keymap.set('n', '<Up>', function()
-        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-        local prev_line = find_interactive_line(interactive_lines, current_line, -1)
-        vim.api.nvim_win_set_cursor(graph_win, {prev_line, 0})
-    end, opts)
-    
-    vim.keymap.set('n', '<CR>', function()
-        local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-        local line_data = interactive_lines[current_line]
-        
-        if line_data and line_data.interactive and line_data.filename then
-            M.toggle_visual_graph()
-            local file_path = find_markdown_file(line_data.filename)
-            if file_path then
-                add_current_to_history()
-                vim.cmd("edit " .. vim.fn.fnameescape(file_path))
-            else
-                vim.notify("File not found: " .. line_data.filename, vim.log.levels.WARN)
-            end
-        end
-    end, opts)
-    
-    vim.cmd('normal! gg')
-    local first_interactive = find_interactive_line(interactive_lines, 1, 1)
-    if first_interactive then
-        vim.api.nvim_win_set_cursor(graph_win, {first_interactive, 0})
-    end
-end
 
 --- Toggle the interactive graph view
 function M.toggle_graph()
@@ -1266,7 +926,6 @@ function M.setup(opts)
     vim.api.nvim_create_user_command('PebbleBack', M.go_back, { desc = 'Go back in navigation history' })
     vim.api.nvim_create_user_command('PebbleForward', M.go_forward, { desc = 'Go forward in navigation history' })
     vim.api.nvim_create_user_command('PebbleGraph', M.toggle_graph, { desc = 'Toggle link graph view' })
-    vim.api.nvim_create_user_command('PebbleVisualGraph', M.toggle_visual_graph, { desc = 'Toggle enhanced visual graph view' })
     vim.api.nvim_create_user_command('PebbleHistory', M.show_history, { desc = 'Show navigation history' })
     vim.api.nvim_create_user_command('PebbleStats', M.show_cache_stats, { desc = 'Show cache statistics' })
     vim.api.nvim_create_user_command('PebbleCreateLinkAndNavigate', function()
@@ -1285,7 +944,6 @@ function M.setup(opts)
                 vim.keymap.set("n", "<Tab>", M.next_link, vim.tbl_extend("force", buf_opts, { desc = "Next markdown link" }))
                 vim.keymap.set("n", "<S-Tab>", M.prev_link, vim.tbl_extend("force", buf_opts, { desc = "Previous markdown link" }))
                 vim.keymap.set("n", "<leader>mg", M.toggle_graph, vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown graph" }))
-                vim.keymap.set("n", "<leader>mv", M.toggle_visual_graph, vim.tbl_extend("force", buf_opts, { desc = "Toggle visual markdown graph" }))
                 vim.keymap.set("v", "<leader>mc", M.create_link_and_navigate, vim.tbl_extend("force", buf_opts, { desc = "Create link, file and navigate" }))
                 vim.keymap.set("v", "<leader>ml", M.create_link_and_file, vim.tbl_extend("force", buf_opts, { desc = "Create link and file" }))
             end
@@ -1294,7 +952,6 @@ function M.setup(opts)
     
     if opts.global_keymaps then
         vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
-        vim.keymap.set("n", "<leader>mv", M.toggle_visual_graph, { desc = "Toggle visual markdown graph" })
         vim.keymap.set("n", "<leader>mb", M.go_back, { desc = "Go back in markdown history" })
         vim.keymap.set("n", "<leader>mf", M.go_forward, { desc = "Go forward in markdown history" })
     end
