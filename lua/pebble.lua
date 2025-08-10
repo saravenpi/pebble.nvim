@@ -433,6 +433,53 @@ function M.toggle_checklist()
 	end
 end
 
+--- Increase heading level on current line
+function M.increase_heading()
+	local line_num = vim.api.nvim_win_get_cursor(0)[1]
+	local line = vim.api.nvim_get_current_line()
+	
+	-- Check if line already has heading
+	local indent, hashes, content = line:match("^(%s*)(#+)(%s*.*)$")
+	if hashes then
+		if #hashes < 6 then -- Don't go beyond h6
+			local new_line = indent .. "#" .. hashes .. content
+			vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, { new_line })
+		end
+	else
+		-- Create first level heading, handle empty lines
+		local trimmed_line = line:match("^%s*(.-)%s*$") or ""
+		if trimmed_line == "" then
+			vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, { "# " })
+			-- Position cursor after the space
+			vim.api.nvim_win_set_cursor(0, { line_num, 2 })
+		else
+			local new_line = "# " .. line
+			vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, { new_line })
+		end
+	end
+end
+
+--- Decrease heading level on current line
+function M.decrease_heading()
+	local line_num = vim.api.nvim_win_get_cursor(0)[1]
+	local line = vim.api.nvim_get_current_line()
+	
+	-- Check if line has heading
+	local indent, hashes, content = line:match("^(%s*)(#+)(%s*.*)$")
+	if indent and hashes then
+		if #hashes > 1 then
+			-- Remove one hash
+			local new_line = indent .. hashes:sub(2) .. content
+			vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, { new_line })
+		else
+			-- Remove heading completely, keeping just the content
+			local clean_content = content:match("^%s*(.*)$") or ""
+			local new_line = indent .. clean_content
+			vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, false, { new_line })
+		end
+	end
+end
+
 --- Extract text from current visual selection
 local function get_visual_selection()
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
@@ -996,6 +1043,16 @@ function M.setup(opts)
 	vim.api.nvim_create_user_command("PebbleCreateLinkAndFile", function()
 		vim.notify("Select text in visual mode first", vim.log.levels.WARN)
 	end, { desc = "Create link and file without navigation (use in visual mode)" })
+	vim.api.nvim_create_user_command(
+		"PebbleIncreaseHeading",
+		M.increase_heading,
+		{ desc = "Increase markdown heading level" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleDecreaseHeading", 
+		M.decrease_heading,
+		{ desc = "Decrease markdown heading level" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1049,6 +1106,18 @@ function M.setup(opts)
 					"<leader>ml",
 					M.create_link_and_file,
 					vim.tbl_extend("force", buf_opts, { desc = "Create link and file" })
+				)
+				vim.keymap.set(
+					"n",
+					"+",
+					M.increase_heading,
+					vim.tbl_extend("force", buf_opts, { desc = "Increase heading level" })
+				)
+				vim.keymap.set(
+					"n",
+					"-",
+					M.decrease_heading,
+					vim.tbl_extend("force", buf_opts, { desc = "Decrease heading level" })
 				)
 			end,
 		})
