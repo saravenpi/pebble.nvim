@@ -64,8 +64,11 @@ local function get_column_widths(files, columns, display_config, max_width)
 		
 		local width = #display_name
 		for _, file in ipairs(files) do
-			local val = format_value(file[col], 50)
-			width = math.max(width, #val)
+			-- Safely get value only if file is a table
+			if type(file) == "table" then
+				local val = format_value(file[col], 50)
+				width = math.max(width, #val)
+			end
 		end
 		width = math.min(width, max_width)
 		widths[col] = width
@@ -115,13 +118,16 @@ local function render_table_view(files, view_config, display_config)
 		local file_limit = math.min(#files, 100)
 		for i = 1, file_limit do
 			local file = files[i]
-			for key, _ in pairs(file) do
-				if not seen[key] and not key:match("^_") and not key:match("^path$") then
-					seen[key] = true
-					table.insert(columns, key)
-					-- Safety limit: max 20 columns
-					if #columns >= 20 then
-						break
+			-- Ensure file is a valid table before iterating
+			if type(file) == "table" then
+				for key, _ in pairs(file) do
+					if not seen[key] and not key:match("^_") and not key:match("^path$") then
+						seen[key] = true
+						table.insert(columns, key)
+						-- Safety limit: max 20 columns
+						if #columns >= 20 then
+							break
+						end
 					end
 				end
 			end
@@ -159,6 +165,11 @@ local function render_table_view(files, view_config, display_config)
 	for i, file in ipairs(files) do
 		if count >= limit then break end
 		
+		-- Skip files that aren't valid tables
+		if type(file) ~= "table" then
+			goto continue
+		end
+		
 		local line = "│ "
 		for _, col in ipairs(columns) do
 			local value = format_value(file[col], widths[col])
@@ -177,6 +188,8 @@ local function render_table_view(files, view_config, display_config)
 		end
 		
 		count = count + 1
+		
+		::continue::
 	end
 	
 	local footer_line = "└─"

@@ -23,7 +23,12 @@ local function get_markdown_files(root_dir)
 	-- If no files found with find, try Lua-based recursive search as fallback
 	if #files == 0 then
 		local function scan_dir(dir)
-			local items = vim.fn.readdir(dir)
+			-- Safely attempt to read directory
+			local ok, items = pcall(vim.fn.readdir, dir)
+			if not ok or not items then
+				return -- Skip this directory if readdir fails
+			end
+			
 			for _, item in ipairs(items) do
 				local full_path = dir .. "/" .. item
 				local stat = vim.loop.fs_stat(full_path)
@@ -37,7 +42,11 @@ local function get_markdown_files(root_dir)
 			end
 		end
 		
-		scan_dir(root_dir)
+		local ok, _ = pcall(scan_dir, root_dir)
+		if not ok then
+			-- If fallback also fails, return empty list
+			return {}
+		end
 	end
 	
 	return files
@@ -48,8 +57,9 @@ local function parse_frontmatter(file_path)
 		return nil
 	end
 	
-	local lines = vim.fn.readfile(file_path, "", 50)
-	if not lines or #lines == 0 or lines[1] ~= "---" then
+	-- Safely read file
+	local ok, lines = pcall(vim.fn.readfile, file_path, "", 50)
+	if not ok or not lines or #lines == 0 or lines[1] ~= "---" then
 		return nil
 	end
 	
@@ -97,8 +107,11 @@ function M.get_file_data(root_dir, force_refresh)
 	local file_data = {}
 	
 	for _, path in ipairs(files) do
-		local stat = vim.loop.fs_stat(path)
-		if stat then
+		-- Safely process each file
+		local ok, result = pcall(function()
+			local stat = vim.loop.fs_stat(path)
+			if not stat then return nil end
+			
 			local data = {
 				path = path,
 				name = vim.fn.fnamemodify(path, ":t:r"),
@@ -109,13 +122,17 @@ function M.get_file_data(root_dir, force_refresh)
 				frontmatter = parse_frontmatter(path),
 			}
 			
-			if data.frontmatter then
+			if data.frontmatter and type(data.frontmatter) == "table" then
 				for key, value in pairs(data.frontmatter) do
 					data[key] = value
 				end
 			end
 			
-			table.insert(file_data, data)
+			return data
+		end)
+		
+		if ok and result then
+			table.insert(file_data, result)
 		end
 	end
 	
