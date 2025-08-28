@@ -110,15 +110,21 @@ function M.open_base(base_path)
 end
 
 function M.open_current_base()
-	local current_file = vim.fn.expand("%:p")
+	local ok, err = pcall(function()
+		local current_file = vim.fn.expand("%:p")
+		
+		if current_file:match("%.base$") then
+			-- If currently in a .base file, open it
+			M.open_base(current_file)
+		else
+			-- If not in a .base file, show list of available bases
+			vim.notify("Not currently in a .base file. Showing available bases...", vim.log.levels.INFO)
+			M.list_bases()
+		end
+	end)
 	
-	if current_file:match("%.base$") then
-		-- If currently in a .base file, open it
-		M.open_base(current_file)
-	else
-		-- If not in a .base file, show list of available bases
-		vim.notify("Not currently in a .base file. Showing available bases...", vim.log.levels.INFO)
-		M.list_bases()
+	if not ok then
+		vim.notify("Error in open_current_base: " .. tostring(err), vim.log.levels.ERROR)
 	end
 end
 
@@ -141,7 +147,10 @@ function M.list_bases()
 		},
 		function(choice, idx)
 			if choice and idx then
-				M.open_base(bases[idx].path)
+				local ok, err = pcall(M.open_base, bases[idx].path)
+				if not ok then
+					vim.notify("Error opening base: " .. tostring(err), vim.log.levels.ERROR)
+				end
 			end
 		end
 	)
