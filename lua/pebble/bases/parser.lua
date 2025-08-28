@@ -1,64 +1,72 @@
 local M = {}
 
 local function parse_yaml(content)
-	-- Try simple line-by-line parsing first (more reliable)
+	-- Simple YAML parser focused on Obsidian base format
 	local lines = vim.split(content, "\n")
 	local result = {}
-	local current_section = nil
-	local current_list = nil
-	local indent_stack = {}
+	local stack = {{obj = result, key = nil, indent = -1}}
 	
 	for i, line in ipairs(lines) do
-		local original_line = line
-		local leading_spaces = line:match("^(%s*)")
-		local indent_level = #leading_spaces
-		line = line:gsub("^%s+", "")
-		
 		-- Skip empty lines and comments
-		if line == "" or line:match("^#") then
+		if line:match("^%s*$") or line:match("^%s*#") then
 			goto continue
 		end
 		
-		-- Handle root-level keys
-		if indent_level == 0 then
-			local key, value = line:match("^([%w_%-]+):%s*(.*)$")
-			if key then
-				current_section = key
-				if value == "" or value == nil then
-					result[key] = {}
-					current_list = nil
-				else
-					-- Clean quotes
-					value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-					result[key] = value
-					current_list = nil
+		local indent = #(line:match("^(%s*)"))
+		local trimmed = line:gsub("^%s+", "")
+		
+		-- Adjust stack based on indentation
+		while #stack > 1 and stack[#stack].indent >= indent do
+			table.remove(stack)
+		end
+		
+		local current = stack[#stack]
+		
+		if trimmed:match("^%- ") then
+			-- List item
+			local item = trimmed:match("^%- (.*)$")
+			if item then
+				-- Ensure current container is array
+				if current.key then
+					if type(current.obj[current.key]) ~= "table" then
+						current.obj[current.key] = {}
+					end
+					-- Parse the list item - could be a string or object
+					if item:match(":") then
+						-- It's an object in the list
+						local obj = {}
+						table.insert(current.obj[current.key], obj)
+						table.insert(stack, {obj = obj, key = nil, indent = indent})
+						
+						-- Parse the first key-value pair
+						local key, value = item:match("^([^:]+):%s*(.*)$")
+						if key and value then
+							key = key:gsub("^%s+", ""):gsub("%s+$", "")
+							value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+							if value == "" then
+								obj[key] = {}
+							else
+								obj[key] = value
+							end
+						end
+					else
+						-- Simple string item
+						item = item:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+						table.insert(current.obj[current.key], item)
+					end
 				end
 			end
-		-- Handle nested items
-		elseif current_section and result[current_section] then
-			if line:match("^%- ") then
-				-- List item
-				local value = line:match("^%- (.+)$")
-				if value then
+		elseif trimmed:match(":") then
+			-- Key-value pair
+			local key, value = trimmed:match("^([^:]+):%s*(.*)$")
+			if key then
+				key = key:gsub("^%s+", ""):gsub("%s+$", "")
+				if value == "" or value == nil then
+					current.obj[key] = {}
+					table.insert(stack, {obj = current.obj, key = key, indent = indent})
+				else
 					value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-					if type(result[current_section]) ~= "table" then
-						result[current_section] = {}
-					end
-					table.insert(result[current_section], value)
-				end
-			else
-				-- Key-value pair in section
-				local key, value = line:match("^([%w_%-%.]+):%s*(.*)$")
-				if key then
-					if type(result[current_section]) ~= "table" then
-						result[current_section] = {}
-					end
-					if value == "" or value == nil then
-						result[current_section][key] = {}
-					else
-						value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-						result[current_section][key] = value
-					end
+					current.obj[key] = value
 				end
 			end
 		end

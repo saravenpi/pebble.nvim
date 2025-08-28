@@ -85,28 +85,46 @@ end
 
 local function has_tag(file_path, tag)
 	local content = get_file_content(file_path)
+	local escaped_tag = vim.pesc(tag)
 	
-	-- Check for inline #tags
-	if content:match("#" .. vim.pesc(tag) .. "%f[%W]") then
+	-- Check for inline #tags in content (outside frontmatter)
+	local after_frontmatter = content
+	local frontmatter_match = content:match("^%-%-%-.-\n%-%-%-\n(.*)$")
+	if frontmatter_match then
+		after_frontmatter = frontmatter_match
+	end
+	
+	if after_frontmatter:match("#" .. escaped_tag .. "(%s|$|%p)") then
 		return true
 	end
 	
-	-- Check for frontmatter tags
-	local frontmatter_start = content:match("^%-%-%-")
-	if frontmatter_start then
-		local frontmatter_end = content:match("\n%-%-%-")
-		if frontmatter_end then
-			local frontmatter = content:match("^%-%-%-\n(.-)%-%-%-")
-			if frontmatter then
-				-- Check for tags: [tag1, tag2] format
-				if frontmatter:match("tags:%s*%[.-" .. vim.pesc(tag) .. ".-]") then
-					return true
-				end
-				-- Check for tags:\n  - tag format
-				if frontmatter:match("tags:%s*\n%s*%-%s*" .. vim.pesc(tag)) then
-					return true
+	-- Check frontmatter tags
+	local frontmatter = content:match("^%-%-%-\n(.-)%-%-%-")
+	if frontmatter then
+		-- tags: [tag1, tag2] format
+		local tags_line = frontmatter:match("tags:%s*(%[.-%])")
+		if tags_line then
+			local tags_content = tags_line:match("%[(.-)%]")
+			if tags_content then
+				for t in tags_content:gmatch("([^,]+)") do
+					t = t:match("^%s*(.-)%s*$"):gsub('^["\']', ''):gsub('["\']$', '')
+					if t == tag then
+						return true
+					end
 				end
 			end
+		end
+		
+		-- tags:\n  - tag format  
+		for line in frontmatter:gmatch("[^\n]+") do
+			if line:match("^%s*%-%s*" .. escaped_tag .. "%s*$") then
+				return true
+			end
+		end
+		
+		-- tags: tag format
+		if frontmatter:match("tags:%s*" .. escaped_tag .. "(%s|$)") then
+			return true
 		end
 	end
 	
