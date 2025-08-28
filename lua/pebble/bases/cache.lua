@@ -19,8 +19,6 @@ local function get_markdown_files(root_dir)
 		end
 	end
 	
-	-- Debug: log how many files we found
-	vim.notify("Found " .. #files .. " markdown files recursively in " .. root_dir, vim.log.levels.INFO)
 	
 	-- If no files found with find, try Lua-based recursive search as fallback
 	if #files == 0 then
@@ -40,7 +38,6 @@ local function get_markdown_files(root_dir)
 		end
 		
 		scan_dir(root_dir)
-		vim.notify("Fallback Lua scan found " .. #files .. " files", vim.log.levels.INFO)
 	end
 	
 	return files

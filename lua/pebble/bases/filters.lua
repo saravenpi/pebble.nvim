@@ -88,8 +88,6 @@ local function has_tag(file_path, tag)
 	local escaped_tag = vim.pesc(tag)
 	local filename = vim.fn.fnamemodify(file_path, ":t")
 	
-	-- Debug: Log what we're checking
-	vim.notify("Checking " .. filename .. " for tag: " .. tag, vim.log.levels.INFO)
 	
 	-- Check for inline #tags in content (outside frontmatter)
 	local after_frontmatter = content
@@ -99,7 +97,6 @@ local function has_tag(file_path, tag)
 	end
 	
 	if after_frontmatter:match("#" .. escaped_tag .. "(%s|$|%p)") then
-		vim.notify("✅ Found inline tag #" .. tag .. " in " .. filename, vim.log.levels.INFO)
 		return true
 	end
 	
@@ -114,7 +111,6 @@ local function has_tag(file_path, tag)
 				for t in tags_content:gmatch("([^,]+)") do
 					t = t:match("^%s*(.-)%s*$"):gsub('^["\']', ''):gsub('["\']$', '')
 					if t == tag then
-						vim.notify("✅ Found frontmatter tag " .. tag .. " in " .. filename, vim.log.levels.INFO)
 						return true
 					end
 				end
