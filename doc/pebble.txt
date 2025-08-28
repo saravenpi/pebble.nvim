@@ -136,7 +136,8 @@ Global keymaps (when global_keymaps = true):
 *<leader>mv*     Toggle visual graph view
 *<leader>mp*     Go to previous in navigation history
 *<leader>mn*     Go to next in navigation history
-*<leader>mb*     List available bases
+*<leader>mB*     List available bases
+*<leader>mb*     Open current base view
 
 ==============================================================================
 6. CONFIGURATION                                       *pebble-configuration*

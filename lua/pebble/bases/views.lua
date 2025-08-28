@@ -179,18 +179,37 @@ function M.render_view(files, view_config, display_config)
 end
 
 function M.open_base_view(base_data, files)
+	-- Close existing view if open
 	if base_view_win and vim.api.nvim_win_is_valid(base_view_win) then
 		vim.api.nvim_win_close(base_view_win, true)
+		base_view_win = nil
+		base_view_buf = nil
 	end
 	
-	base_view_buf = create_buffer()
+	-- Validate inputs
+	if not base_data then
+		vim.notify("No base data provided", vim.log.levels.ERROR)
+		return
+	end
 	
-	local width = math.floor(vim.o.columns * 0.8)
-	local height = math.floor(vim.o.lines * 0.8)
-	local row = math.floor((vim.o.lines - height) / 2)
-	local col = math.floor((vim.o.columns - width) / 2)
+	files = files or {}
 	
-	base_view_win = vim.api.nvim_open_win(base_view_buf, true, {
+	-- Create buffer
+	local ok, buf = pcall(create_buffer)
+	if not ok then
+		vim.notify("Failed to create buffer: " .. buf, vim.log.levels.ERROR)
+		return
+	end
+	base_view_buf = buf
+	
+	-- Calculate window dimensions
+	local width = math.max(60, math.floor(vim.o.columns * 0.8))
+	local height = math.max(20, math.floor(vim.o.lines * 0.8))
+	local row = math.max(0, math.floor((vim.o.lines - height) / 2))
+	local col = math.max(0, math.floor((vim.o.columns - width) / 2))
+	
+	-- Create floating window
+	local ok_win, win = pcall(vim.api.nvim_open_win, base_view_buf, true, {
 		relative = 'editor',
 		width = width,
 		height = height,
@@ -201,6 +220,12 @@ function M.open_base_view(base_data, files)
 		title = ' Base View ',
 		title_pos = 'center',
 	})
+	
+	if not ok_win then
+		vim.notify("Failed to create window: " .. win, vim.log.levels.ERROR)
+		return
+	end
+	base_view_win = win
 	
 	local view_config = base_data.views and base_data.views[1] or {}
 	local display_config = base_data.display or base_data.properties

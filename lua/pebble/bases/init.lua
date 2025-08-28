@@ -15,28 +15,59 @@ local function get_root_dir()
 end
 
 function M.open_base(base_path)
-	local base_data, err = cache.get_base_data(base_path)
+	-- Validate file path
+	if not base_path or base_path == "" then
+		vim.notify("No base file path provided", vim.log.levels.ERROR)
+		return
+	end
 	
+	if not vim.fn.filereadable(base_path) then
+		vim.notify("Base file not found: " .. base_path, vim.log.levels.ERROR)
+		return
+	end
+	
+	-- Load base data
+	local base_data, err = cache.get_base_data(base_path)
 	if not base_data then
 		vim.notify("Failed to load base: " .. (err or "Unknown error"), vim.log.levels.ERROR)
 		return
 	end
 	
+	-- Get file data
 	local root_dir = get_root_dir()
 	local files = cache.get_file_data(root_dir)
 	
-	if base_data.filters then
-		files = filters.filter_files(files, base_data.filters)
+	if not files or #files == 0 then
+		vim.notify("No markdown files found in " .. root_dir, vim.log.levels.WARN)
+		views.open_base_view(base_data, {})
+		return
 	end
 	
-	if #base_data.views > 0 then
+	-- Apply filters safely
+	if base_data.filters then
+		local ok, result = pcall(filters.filter_files, files, base_data.filters)
+		if ok then
+			files = result
+		else
+			vim.notify("Error applying filters: " .. result, vim.log.levels.ERROR)
+		end
+	end
+	
+	-- Apply view-specific filtering and ordering
+	if base_data.views and #base_data.views > 0 then
 		local view = base_data.views[1]
+		
 		if view.filters then
-			files = filters.filter_files(files, view.filters)
+			local ok, result = pcall(filters.filter_files, files, view.filters)
+			if ok then
+				files = result
+			else
+				vim.notify("Error applying view filters: " .. result, vim.log.levels.ERROR)
+			end
 		end
 		
-		if view.order then
-			table.sort(files, function(a, b)
+		if view.order and #view.order > 0 then
+			local ok, _ = pcall(table.sort, files, function(a, b)
 				for _, order_key in ipairs(view.order) do
 					local ascending = true
 					if order_key:match("^%-") then
@@ -49,21 +80,31 @@ function M.open_base(base_path)
 					
 					if a_val ~= b_val then
 						if ascending then
-							return (a_val or "") < (b_val or "")
+							return tostring(a_val or "") < tostring(b_val or "")
 						else
-							return (a_val or "") > (b_val or "")
+							return tostring(a_val or "") > tostring(b_val or "")
 						end
 					end
 				end
 				return false
 			end)
+			if not ok then
+				vim.notify("Error sorting files", vim.log.levels.WARN)
+			end
 		end
 	end
 	
+	-- Apply formulas safely
 	if base_data.formulas then
-		files = formulas.apply_formulas_to_files(files, base_data.formulas)
+		local ok, result = pcall(formulas.apply_formulas_to_files, files, base_data.formulas)
+		if ok then
+			files = result
+		else
+			vim.notify("Error applying formulas: " .. result, vim.log.levels.ERROR)
+		end
 	end
 	
+	-- Open the view
 	views.open_base_view(base_data, files)
 end
 

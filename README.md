@@ -67,7 +67,7 @@ use {
 
 ### Database Views (Bases)
 - Create `.base` files with YAML configuration
-- Press `<leader>mb` to list all available bases
+- Press `<leader>mB` to list all available bases
 - Press `<leader>bo` when editing a `.base` file to preview it
 - Navigate with `j/k`, `↑/↓`, `G/gg`
 - Press `<CR>` to open selected file
@@ -129,7 +129,8 @@ Set `global_keymaps = true` in setup to enable:
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mp` - Go to previous in navigation history
 - `<leader>mn` - Go to next in navigation history
-- `<leader>mb` - List available bases
+- `<leader>mB` - List available bases
+- `<leader>mb` - Open current base view
 
 ## Configuration
 

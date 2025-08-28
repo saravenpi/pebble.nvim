@@ -1,52 +1,72 @@
 local M = {}
 
 local function parse_yaml(content)
-	local ok, yaml = pcall(function()
-		return vim.fn.json_decode(vim.fn.system("python3 -c 'import sys, yaml, json; print(json.dumps(yaml.safe_load(sys.stdin.read())))'", content))
-	end)
+	-- Try simple line-by-line parsing first (more reliable)
+	local lines = vim.split(content, "\n")
+	local result = {}
+	local current_section = nil
+	local current_list = nil
+	local indent_stack = {}
 	
-	if not ok then
-		local lines = vim.split(content, "\n")
-		local result = {}
-		local current_key = nil
-		local current_list = nil
-		local in_list = false
+	for i, line in ipairs(lines) do
+		local original_line = line
+		local leading_spaces = line:match("^(%s*)")
+		local indent_level = #leading_spaces
+		line = line:gsub("^%s+", "")
 		
-		for _, line in ipairs(lines) do
-			line = line:gsub("^%s+", "")
-			
-			if line ~= "" and not line:match("^#") then
-				if line:match("^%- ") then
-					if current_list then
-						local value = line:match("^%- (.+)$")
-						if value then
-							value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-							table.insert(current_list, value)
-						end
-					end
+		-- Skip empty lines and comments
+		if line == "" or line:match("^#") then
+			goto continue
+		end
+		
+		-- Handle root-level keys
+		if indent_level == 0 then
+			local key, value = line:match("^([%w_%-]+):%s*(.*)$")
+			if key then
+				current_section = key
+				if value == "" or value == nil then
+					result[key] = {}
+					current_list = nil
 				else
-					local key, value = line:match("^([%w_%-]+):%s*(.*)$")
-					if key then
-						current_key = key
-						if value == "" or value == nil then
-							current_list = {}
-							result[key] = current_list
-							in_list = true
-						else
-							value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-							result[key] = value
-							current_list = nil
-							in_list = false
-						end
+					-- Clean quotes
+					value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+					result[key] = value
+					current_list = nil
+				end
+			end
+		-- Handle nested items
+		elseif current_section and result[current_section] then
+			if line:match("^%- ") then
+				-- List item
+				local value = line:match("^%- (.+)$")
+				if value then
+					value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+					if type(result[current_section]) ~= "table" then
+						result[current_section] = {}
+					end
+					table.insert(result[current_section], value)
+				end
+			else
+				-- Key-value pair in section
+				local key, value = line:match("^([%w_%-%.]+):%s*(.*)$")
+				if key then
+					if type(result[current_section]) ~= "table" then
+						result[current_section] = {}
+					end
+					if value == "" or value == nil then
+						result[current_section][key] = {}
+					else
+						value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+						result[current_section][key] = value
 					end
 				end
 			end
 		end
 		
-		return result
+		::continue::
 	end
 	
-	return yaml
+	return result
 end
 
 function M.parse_base_file(file_path)
