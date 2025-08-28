@@ -19,7 +19,22 @@ local function format_value(value, max_width)
 	if value == nil then
 		return ""
 	elseif type(value) == "table" then
-		local str = table.concat(value, ", ")
+		-- Safety check for tables - avoid infinite recursion
+		local ok, str = pcall(function()
+			if #value > 50 then
+				-- Too many items, truncate
+				local limited = {}
+				for i = 1, 50 do
+					table.insert(limited, tostring(value[i] or ""))
+				end
+				return table.concat(limited, ", ") .. "..."
+			else
+				return table.concat(value, ", ")
+			end
+		end)
+		if not ok then
+			return "[complex table]"
+		end
 		if #str > max_width then
 			return str:sub(1, max_width - 3) .. "..."
 		end
@@ -96,12 +111,22 @@ local function render_table_view(files, view_config, display_config)
 			end
 		end
 		
-		for _, file in ipairs(files) do
+		-- Safety limit: only process first 100 files and max 20 columns
+		local file_limit = math.min(#files, 100)
+		for i = 1, file_limit do
+			local file = files[i]
 			for key, _ in pairs(file) do
 				if not seen[key] and not key:match("^_") and not key:match("^path$") then
 					seen[key] = true
 					table.insert(columns, key)
+					-- Safety limit: max 20 columns
+					if #columns >= 20 then
+						break
+					end
 				end
+			end
+			if #columns >= 20 then
+				break
 			end
 		end
 	end
@@ -129,7 +154,7 @@ local function render_table_view(files, view_config, display_config)
 	separator_line = separator_line:sub(1, -3) .. "┤"
 	table.insert(lines, separator_line)
 	
-	local limit = view_config.limit or 100
+	local limit = math.min(view_config.limit or 100, 500) -- Hard limit of 500 files
 	local count = 0
 	for i, file in ipairs(files) do
 		if count >= limit then break end
@@ -229,7 +254,19 @@ function M.open_base_view(base_data, files)
 	
 	local view_config = base_data.views and base_data.views[1] or {}
 	local display_config = base_data.display or base_data.properties
-	local lines, highlights = M.render_view(files, view_config, display_config)
+	
+	-- Render view with error protection
+	local lines, highlights = {}, {}
+	local ok, result_lines, result_highlights = pcall(M.render_view, files, view_config, display_config)
+	
+	if ok then
+		lines = result_lines or {}
+		highlights = result_highlights or {}
+	else
+		lines = {"", "Error rendering base view:", tostring(result_lines), ""}
+		highlights = {}
+		vim.notify("Error rendering base view: " .. tostring(result_lines), vim.log.levels.ERROR)
+	end
 	
 	vim.api.nvim_buf_set_option(base_view_buf, 'modifiable', true)
 	vim.api.nvim_buf_set_lines(base_view_buf, 0, -1, false, lines)

@@ -117,9 +117,22 @@ function M.open_current_base()
 			-- If currently in a .base file, open it
 			M.open_base(current_file)
 		else
-			-- If not in a .base file, show list of available bases
-			vim.notify("Not currently in a .base file. Showing available bases...", vim.log.levels.INFO)
-			M.list_bases()
+			-- If not in a .base file, find and open the first available base
+			local root_dir = get_root_dir()
+			local bases = parser.find_base_files(root_dir)
+			
+			if #bases == 0 then
+				vim.notify("No .base files found in " .. root_dir, vim.log.levels.WARN)
+				return
+			elseif #bases == 1 then
+				-- Only one base file, open it directly
+				vim.notify("Opening " .. bases[1].relative_path, vim.log.levels.INFO)
+				M.open_base(bases[1].path)
+			else
+				-- Multiple bases available, open the first one by default
+				vim.notify("Opening first of " .. #bases .. " available bases: " .. bases[1].relative_path .. " (use :PebbleBases to select)", vim.log.levels.INFO)
+				M.open_base(bases[1].path)
+			end
 		end
 	end)
 	
@@ -137,7 +150,22 @@ function M.list_bases()
 		return
 	end
 	
-	vim.ui.select(
+	-- Add timeout protection for vim.ui.select
+	local selection_made = false
+	local function safe_callback(choice, idx)
+		if selection_made then return end
+		selection_made = true
+		
+		if choice and idx then
+			local ok, err = pcall(M.open_base, bases[idx].path)
+			if not ok then
+				vim.notify("Error opening base: " .. tostring(err), vim.log.levels.ERROR)
+			end
+		end
+	end
+	
+	-- Try vim.ui.select with protection
+	local ok, err = pcall(vim.ui.select,
 		vim.tbl_map(function(base) return base.relative_path end, bases),
 		{
 			prompt = "Select a base:",
@@ -145,15 +173,14 @@ function M.list_bases()
 				return item
 			end,
 		},
-		function(choice, idx)
-			if choice and idx then
-				local ok, err = pcall(M.open_base, bases[idx].path)
-				if not ok then
-					vim.notify("Error opening base: " .. tostring(err), vim.log.levels.ERROR)
-				end
-			end
-		end
+		safe_callback
 	)
+	
+	if not ok then
+		vim.notify("Error showing base selection: " .. tostring(err), vim.log.levels.ERROR)
+		-- Fallback: just open the first base
+		M.open_base(bases[1].path)
+	end
 end
 
 return M
