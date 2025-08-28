@@ -7,8 +7,8 @@ local CACHE_TTL = 5000
 
 local function get_markdown_files(root_dir)
 	local files = {}
-	-- Use find with recursive search, excluding common ignore directories
-	local cmd = string.format([[find '%s' -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' 2>/dev/null]], root_dir)
+	-- Performance: Use find with explicit limits to prevent hanging on large repositories
+	local cmd = string.format([[find '%s' -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' ! -path '*/target/*' ! -path '*/.venv/*' ! -path '*/.tox/*' | head -n 2000 2>/dev/null]], root_dir)
 	local result = vim.fn.system(cmd)
 	
 	if vim.v.shell_error == 0 and result ~= "" then
@@ -20,9 +20,17 @@ local function get_markdown_files(root_dir)
 	end
 	
 	
-	-- If no files found with find, try Lua-based recursive search as fallback
+	-- If no files found with find, try Lua-based recursive search as fallback (with limits)
 	if #files == 0 then
-		local function scan_dir(dir)
+		local scan_count = 0
+		local MAX_SCAN_FILES = 1000  -- Performance limit
+		
+		local function scan_dir(dir, depth)
+			-- Performance: Limit recursion depth
+			if depth > 10 or scan_count > MAX_SCAN_FILES then
+				return
+			end
+			
 			-- Safely attempt to read directory
 			local ok, items = pcall(vim.fn.readdir, dir)
 			if not ok or not items then
@@ -30,19 +38,25 @@ local function get_markdown_files(root_dir)
 			end
 			
 			for _, item in ipairs(items) do
+				if scan_count > MAX_SCAN_FILES then break end
+				
 				local full_path = dir .. "/" .. item
 				local stat = vim.loop.fs_stat(full_path)
 				if stat then
-					if stat.type == "directory" and not item:match("^%.") and item ~= "node_modules" and item ~= ".git" and item ~= ".obsidian" then
-						scan_dir(full_path)
+					if stat.type == "directory" and not item:match("^%.") and 
+					   item ~= "node_modules" and item ~= ".git" and item ~= ".obsidian" and 
+					   item ~= "build" and item ~= "dist" and item ~= "target" and
+					   item ~= ".venv" and item ~= ".tox" then
+						scan_dir(full_path, depth + 1)
 					elseif stat.type == "file" and (item:match("%.md$") or item:match("%.markdown$")) then
 						table.insert(files, full_path)
+						scan_count = scan_count + 1
 					end
 				end
 			end
 		end
 		
-		local ok, _ = pcall(scan_dir, root_dir)
+		local ok, _ = pcall(scan_dir, root_dir, 0)
 		if not ok then
 			-- If fallback also fails, return empty list
 			return {}
@@ -57,8 +71,8 @@ local function parse_frontmatter(file_path)
 		return nil
 	end
 	
-	-- Safely read file
-	local ok, lines = pcall(vim.fn.readfile, file_path, "", 50)
+	-- Performance: Only read first 20 lines for frontmatter parsing
+	local ok, lines = pcall(vim.fn.readfile, file_path, "", 20)
 	if not ok or not lines or #lines == 0 or lines[1] ~= "---" then
 		return nil
 	end

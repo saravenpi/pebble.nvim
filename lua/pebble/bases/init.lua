@@ -1,5 +1,10 @@
 local M = {}
 
+-- Performance: Cache git root to avoid repeated system calls
+local _git_root_cache = nil
+local _git_root_cache_time = 0
+local GIT_ROOT_CACHE_TTL = 30000  -- 30 seconds
+
 -- Simple module loading
 local parser = require("pebble.bases.parser")
 local filters = require("pebble.bases.filters")  
@@ -8,11 +13,24 @@ local views = require("pebble.bases.views")
 local cache = require("pebble.bases.cache")
 
 local function get_root_dir()
-	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-	if vim.v.shell_error ~= 0 or git_root == "" then
-		return vim.fn.getcwd()
+	local now = vim.loop.now()
+	-- Use cached git root if still valid
+	if _git_root_cache and (now - _git_root_cache_time) < GIT_ROOT_CACHE_TTL then
+		return _git_root_cache
 	end
-	return git_root
+	
+	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
+	local root_dir
+	if vim.v.shell_error ~= 0 or git_root == "" then
+		root_dir = vim.fn.getcwd()
+	else
+		root_dir = git_root
+	end
+	
+	-- Cache the result
+	_git_root_cache = root_dir
+	_git_root_cache_time = now
+	return root_dir
 end
 
 function M.open_base(base_path)
@@ -133,6 +151,24 @@ function M.open_current_base()
 end
 
 function M.list_bases()
+	-- Check if telescope is available
+	local telescope_ok, telescope = pcall(require, 'telescope')
+	if not telescope_ok then
+		vim.notify("Telescope is required for bases functionality. Please install telescope.nvim", vim.log.levels.ERROR)
+		return
+	end
+	
+	local pickers_ok, pickers = pcall(require, 'telescope.pickers')
+	local finders_ok, finders = pcall(require, 'telescope.finders')  
+	local conf_ok, conf = pcall(require, 'telescope.config')
+	local actions_ok, actions = pcall(require, 'telescope.actions')
+	local action_state_ok, action_state = pcall(require, 'telescope.actions.state')
+	
+	if not (pickers_ok and finders_ok and conf_ok and actions_ok and action_state_ok) then
+		vim.notify("Telescope modules not available. Please ensure telescope.nvim is properly installed", vim.log.levels.ERROR)
+		return
+	end
+
 	local root_dir = get_root_dir()
 	local bases = parser.find_base_files(root_dir)
 	
@@ -141,21 +177,34 @@ function M.list_bases()
 		return
 	end
 	
-	-- Simple selection callback
-	local function safe_callback(choice, idx)
-		if choice and idx and bases[idx] then
-			M.open_base(bases[idx].path)
-		end
-	end
+	-- Create telescope picker for base selection
+	local picker = pickers.new({}, {
+		prompt_title = "Select Base File",
+		finder = finders.new_table({
+			results = bases,
+			entry_maker = function(base)
+				return {
+					value = base,
+					display = base.relative_path,
+					ordinal = base.relative_path,
+					path = base.path,
+				}
+			end,
+		}),
+		sorter = conf.values.generic_sorter({}),
+		attach_mappings = function(prompt_bufnr, map)
+			actions.select_default:replace(function()
+				actions.close(prompt_bufnr)
+				local selection = action_state.get_selected_entry()
+				if selection and selection.value then
+					M.open_base(selection.value.path)
+				end
+			end)
+			return true
+		end,
+	})
 	
-	-- Show selection
-	vim.ui.select(
-		vim.tbl_map(function(base) return base.relative_path end, bases),
-		{
-			prompt = "Select a base:",
-		},
-		safe_callback
-	)
+	picker:find()
 end
 
 return M

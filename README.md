@@ -20,10 +20,20 @@ Obsidian-style markdown link navigation and database views for Neovim.
 
 ## Installation
 
+### Dependencies
+
+- **Required**: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) - Used for bases functionality
+- **Optional**: [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) - Enhanced syntax highlighting
+
 ### Using lazy.nvim
 ```lua
 {
-    dir = "path/to/pebble",
+    "saravenpi/pebble.nvim",
+    dependencies = {
+        "nvim-telescope/telescope.nvim",
+        -- Optional: enhanced treesitter support
+        -- "nvim-treesitter/nvim-treesitter",
+    },
     config = function()
         require('pebble').setup({
             auto_setup_keymaps = true,
@@ -36,7 +46,10 @@ Obsidian-style markdown link navigation and database views for Neovim.
 ### Using Packer
 ```lua
 use {
-    'path/to/pebble',
+    'saravenpi/pebble.nvim',
+    requires = {
+        'nvim-telescope/telescope.nvim',
+    },
     config = function()
         require('pebble').setup()
     end
@@ -183,6 +196,8 @@ Pebble works excellently with [**markview.nvim**](https://github.com/OXY2DEV/mar
 
 ### Bases (Database Views)
 Create Obsidian-compatible database views from your markdown files using `.base` files. Fully compatible with Obsidian's bases feature introduced in 2025.
+
+**Note**: Bases functionality uses Telescope for the UI. Make sure telescope.nvim is installed and configured.
 
 **Example base file (tasks.base):**
 ```yaml

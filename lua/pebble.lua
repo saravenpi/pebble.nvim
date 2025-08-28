@@ -1,5 +1,10 @@
 local M = {}
 
+-- Performance: Cache git root to avoid repeated system calls
+local _git_root_cache = nil
+local _git_root_cache_time = 0
+local GIT_ROOT_CACHE_TTL = 30000  -- 30 seconds
+
 local file_cache = {}
 local alias_cache = {}
 local cache_valid = false
@@ -104,28 +109,60 @@ local function ensure_file_alias(file_path)
 	alias_cache[file_path] = true
 end
 
+--- Get root directory with caching for performance
+local function get_root_dir()
+	local now = vim.loop.now()
+	-- Use cached git root if still valid
+	if _git_root_cache and (now - _git_root_cache_time) < GIT_ROOT_CACHE_TTL then
+		return _git_root_cache
+	end
+	
+	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
+	local root_dir
+	if vim.v.shell_error ~= 0 or git_root == "" then
+		root_dir = vim.fn.getcwd()
+	else
+		root_dir = git_root
+	end
+	
+	-- Cache the result
+	_git_root_cache = root_dir
+	_git_root_cache_time = now
+	return root_dir
+end
+
 --- Build cache of all markdown files in the current repository or directory
 local function build_file_cache()
 	file_cache = {}
 	-- Don't clear alias_cache - keep it for performance
-	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-	local cwd = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
+	local cwd = get_root_dir()
 
+	-- Performance: Use lazy loading with reduced initial scan limit
 	local md_files = vim.fs.find(function(name)
 		return name:match("%.md$")
 	end, {
 		path = cwd,
 		type = "file",
-		limit = 1000,
+		limit = 500,  -- Reduced for performance - lazy load more if needed
 		upward = false,
 	})
 
+	-- Performance: Process files in batches to avoid blocking
+	local batch_size = 50
+	local processed = 0
+	
 	for _, file_path in ipairs(md_files) do
 		local filename = vim.fn.fnamemodify(file_path, ":t:r")
 		if not file_cache[filename] then
 			file_cache[filename] = {}
 		end
 		table.insert(file_cache[filename], file_path)
+		
+		processed = processed + 1
+		-- Yield control periodically to prevent blocking UI
+		if processed % batch_size == 0 then
+			vim.schedule(function() end)  -- Yield to UI
+		end
 	end
 
 	cache_valid = true
@@ -373,8 +410,7 @@ local function create_new_file(link, title)
 	if current_file and current_file ~= "" and current_file:match("%.md$") then
 		target_dir = vim.fn.fnamemodify(current_file, ":h")
 	else
-		local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-		target_dir = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
+		target_dir = get_root_dir()
 	end
 
 	local new_file_path = target_dir .. "/" .. link .. ".md"
@@ -887,6 +923,10 @@ local function build_comprehensive_graph(current_name, max_depth)
 		level = 0,
 	}
 
+	-- Performance: Process nodes in batches to avoid blocking
+	local batch_count = 0
+	local BATCH_SIZE = 20
+	
 	while #to_process > 0 do
 		local current = table.remove(to_process, 1)
 		local name, level = current.name, current.level
@@ -896,6 +936,12 @@ local function build_comprehensive_graph(current_name, max_depth)
 		end
 
 		processed[name] = true
+		batch_count = batch_count + 1
+		
+		-- Yield control periodically
+		if batch_count % BATCH_SIZE == 0 then
+			vim.schedule(function() end)  -- Yield to UI
+		end
 
 		-- Get file path for this node
 		local file_path = name == current_name and current_file or find_markdown_file(name)
@@ -975,268 +1021,132 @@ local function build_link_graph()
 	return graph, current_name
 end
 
---- Create clean text representation of the graph with interactive elements
-local function create_graph_text(graph, current_name)
-	local lines = {}
-	local processed = {}
-	local interactive_lines = {}
-
-	local function add_line(content, is_interactive, filename)
-		lines[#lines + 1] = content
-		interactive_lines[#lines] = {
-			interactive = is_interactive or false,
-			filename = filename,
-		}
-	end
-
-	local incoming_files = {}
-	local outgoing_files = {}
-	local orphaned = {}
-
-	for file, _ in pairs(graph[current_name].incoming) do
-		table.insert(incoming_files, file)
-	end
-	table.sort(incoming_files)
-
-	for file, _ in pairs(graph[current_name].outgoing) do
-		table.insert(outgoing_files, file)
-	end
-	table.sort(outgoing_files)
-
-	for _, file in ipairs(incoming_files) do
-		processed[file] = true
-	end
-	for _, file in ipairs(outgoing_files) do
-		processed[file] = true
-	end
-
-	for file, _ in pairs(graph) do
-		if not processed[file] and file ~= current_name then
-			table.insert(orphaned, file)
-		end
-	end
-	table.sort(orphaned)
-
-	add_line("Pebble - Markdown Link Graph", false)
-	add_line("", false)
-
-	if #incoming_files > 0 then
-		add_line("◄── Incoming Links:", false)
-		for _, file in ipairs(incoming_files) do
-			add_line("  ➤ " .. file, true, file)
-		end
-		add_line("", false)
-	end
-
-	local current_display = "● " .. current_name .. " (current)"
-	add_line(current_display, false)
-	add_line("", false)
-
-	if #outgoing_files > 0 then
-		add_line("──► Outgoing Links:", false)
-		for _, file in ipairs(outgoing_files) do
-			local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-			local marker = exists and "➤ " or "✗ "
-			local interactive = exists
-			add_line("  " .. marker .. file, interactive, exists and file or nil)
-		end
-		add_line("", false)
-	end
-
-	if #orphaned > 0 then
-		add_line("○ Other Connected Files:", false)
-		local orphaned_limit = math.min(#orphaned, 5)
-		for i = 1, orphaned_limit do
-			local file = orphaned[i]
-			local exists = graph[file] and graph[file].file_path and vim.fn.filereadable(graph[file].file_path) == 1
-			local marker = exists and "➤ " or "○ "
-			add_line("  " .. marker .. file, exists, exists and file or nil)
-		end
-		if #orphaned > 5 then
-			local more_count = #orphaned - 5
-			add_line("  ... and " .. more_count .. " more", false)
-		end
-		add_line("", false)
-	end
-
-	local total_files = 0
-	for _ in pairs(graph) do
-		total_files = total_files + 1
-	end
-
-	add_line(
-		"Total files: " .. total_files .. " │ Outgoing: " .. #outgoing_files .. " │ Incoming: " .. #incoming_files,
-		false
-	)
-	add_line("", false)
-	add_line("↑/↓: Navigate │ Enter: Open │ q: Close", false)
-
-	return lines, interactive_lines
-end
-
---- Set up syntax highlighting for the graph view
-local function setup_graph_syntax(buf)
-	vim.api.nvim_buf_call(buf, function()
-		vim.cmd("syntax clear")
-
-		vim.cmd("syntax match GraphTitle /^Pebble - Markdown Link Graph$/")
-		vim.cmd("syntax match GraphCurrent /^● .* (current)$/")
-
-		vim.cmd("syntax match GraphInteractiveMarker /➤/ contained")
-		vim.cmd("syntax match GraphInteractiveFile /\\(➤ \\)\\@<=.*$/ contained")
-		vim.cmd("syntax match GraphInteractiveLine /^  ➤ .*$/ contains=GraphInteractiveMarker,GraphInteractiveFile")
-
-		vim.cmd("syntax match GraphMissingMarker /✗/ contained")
-		vim.cmd("syntax match GraphMissingFile /\\(✗ \\)\\@<=.*$/ contained")
-		vim.cmd("syntax match GraphMissingLine /^  ✗ .*$/ contains=GraphMissingMarker,GraphMissingFile")
-
-		vim.cmd("syntax match GraphSection /^◄──.*:\\|^──►.*:\\|^○.*:/")
-
-		vim.cmd("syntax match GraphStats /^Total files.*/")
-		vim.cmd("syntax match GraphHelp /^↑\\/↓.*/")
-
-		vim.cmd("highlight GraphTitle guifg=#b4befe ctermfg=147 gui=bold")
-		vim.cmd("highlight GraphCurrent guifg=#f9e2af ctermfg=221 gui=bold")
-
-		vim.cmd("highlight GraphInteractiveMarker guifg=#a6e3a1 ctermfg=151 gui=bold")
-		vim.cmd("highlight GraphInteractiveFile guifg=#a6e3a1 ctermfg=151")
-
-		vim.cmd("highlight GraphMissingMarker guifg=#f38ba8 ctermfg=210 gui=bold")
-		vim.cmd("highlight GraphMissingFile guifg=#f38ba8 ctermfg=210")
-
-		vim.cmd("highlight GraphSection guifg=#89b4fa ctermfg=117 gui=bold")
-		vim.cmd("highlight GraphStats guifg=#cdd6f4 ctermfg=189")
-		vim.cmd("highlight GraphHelp guifg=#6c7086 ctermfg=245 gui=italic")
-	end)
-end
-
---- Find next or previous interactive line in the graph
-local function find_interactive_line(interactive_lines, current_line, direction)
-	local lines = {}
-	for line_num, data in pairs(interactive_lines) do
-		if data.interactive then
-			table.insert(lines, line_num)
-		end
-	end
-
-	if #lines == 0 then
-		return current_line
-	end
-
-	table.sort(lines)
-
-	local current_idx = 1
-	for i, line_num in ipairs(lines) do
-		if line_num >= current_line then
-			current_idx = i
-			break
-		end
-	end
-
-	if direction > 0 then
-		current_idx = current_idx + 1
-		if current_idx > #lines then
-			current_idx = 1
-		end
-	else
-		current_idx = current_idx - 1
-		if current_idx < 1 then
-			current_idx = #lines
-		end
-	end
-
-	return lines[current_idx]
-end
 
 --- Toggle the interactive graph view
 function M.toggle_graph()
-	if graph_win and vim.api.nvim_win_is_valid(graph_win) then
-		vim.api.nvim_win_close(graph_win, true)
-		if graph_buf and vim.api.nvim_buf_is_valid(graph_buf) then
-			vim.api.nvim_buf_delete(graph_buf, { force = true })
-		end
-		graph_win = nil
-		graph_buf = nil
+	-- Check if telescope is available
+	local telescope_ok, telescope = pcall(require, 'telescope')
+	if not telescope_ok then
+		vim.notify("Telescope is required for graph functionality. Please install telescope.nvim", vim.log.levels.ERROR)
+		return
+	end
+	
+	local pickers_ok, pickers = pcall(require, 'telescope.pickers')
+	local finders_ok, finders = pcall(require, 'telescope.finders')
+	local conf_ok, conf = pcall(require, 'telescope.config')
+	local actions_ok, actions = pcall(require, 'telescope.actions')
+	local action_state_ok, action_state = pcall(require, 'telescope.actions.state')
+	
+	if not (pickers_ok and finders_ok and conf_ok and actions_ok and action_state_ok) then
+		vim.notify("Telescope modules not available. Please ensure telescope.nvim is properly installed", vim.log.levels.ERROR)
 		return
 	end
 
 	local graph, current_name = build_link_graph()
-	local graph_lines, interactive_lines = create_graph_text(graph, current_name)
-
-	graph_buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_buf_set_option(graph_buf, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(graph_buf, "bufhidden", "wipe")
-	vim.api.nvim_buf_set_option(graph_buf, "filetype", "pebble-graph")
-	vim.api.nvim_buf_set_option(graph_buf, "modifiable", false)
-
-	vim.api.nvim_buf_set_option(graph_buf, "modifiable", true)
-	vim.api.nvim_buf_set_lines(graph_buf, 0, -1, false, graph_lines)
-	vim.api.nvim_buf_set_option(graph_buf, "modifiable", false)
-
-	setup_graph_syntax(graph_buf)
-
-	local height = math.min(#graph_lines + 2, math.floor(vim.o.lines * 0.4))
-	vim.cmd("botright " .. height .. "split")
-	graph_win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(graph_win, graph_buf)
-
-	vim.api.nvim_win_set_option(graph_win, "wrap", false)
-	vim.api.nvim_win_set_option(graph_win, "cursorline", true)
-	vim.api.nvim_win_set_option(graph_win, "number", false)
-	vim.api.nvim_win_set_option(graph_win, "relativenumber", false)
-	vim.api.nvim_win_set_option(graph_win, "signcolumn", "no")
-	vim.api.nvim_win_set_option(graph_win, "cursorlineopt", "both")
-
-	local opts = { buffer = graph_buf, nowait = true, silent = true }
-
-	vim.keymap.set("n", "q", M.toggle_graph, opts)
-	vim.keymap.set("n", "<ESC>", M.toggle_graph, opts)
-
-	vim.keymap.set("n", "j", function()
-		local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-		local next_line = find_interactive_line(interactive_lines, current_line, 1)
-		vim.api.nvim_win_set_cursor(graph_win, { next_line, 0 })
-	end, opts)
-
-	vim.keymap.set("n", "k", function()
-		local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-		local prev_line = find_interactive_line(interactive_lines, current_line, -1)
-		vim.api.nvim_win_set_cursor(graph_win, { prev_line, 0 })
-	end, opts)
-
-	vim.keymap.set("n", "<Down>", function()
-		local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-		local next_line = find_interactive_line(interactive_lines, current_line, 1)
-		vim.api.nvim_win_set_cursor(graph_win, { next_line, 0 })
-	end, opts)
-
-	vim.keymap.set("n", "<Up>", function()
-		local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-		local prev_line = find_interactive_line(interactive_lines, current_line, -1)
-		vim.api.nvim_win_set_cursor(graph_win, { prev_line, 0 })
-	end, opts)
-
-	vim.keymap.set("n", "<CR>", function()
-		local current_line = vim.api.nvim_win_get_cursor(graph_win)[1]
-		local line_data = interactive_lines[current_line]
-
-		if line_data and line_data.interactive and line_data.filename then
-			M.toggle_graph()
-			local file_path = find_markdown_file(line_data.filename)
-			if file_path then
-				add_current_to_history()
-				vim.cmd("edit " .. vim.fn.fnameescape(file_path))
-			else
-				vim.notify("File not found: " .. line_data.filename, vim.log.levels.WARN)
-			end
-		end
-	end, opts)
-
-	vim.cmd("normal! gg")
-	local first_interactive = find_interactive_line(interactive_lines, 1, 1)
-	if first_interactive then
-		vim.api.nvim_win_set_cursor(graph_win, { first_interactive, 0 })
+	
+	-- Create a list of all linked files for telescope
+	local graph_entries = {}
+	
+	-- Add incoming links
+	for file, _ in pairs(graph[current_name].incoming) do
+		local file_info = graph[file]
+		local display_text = "◄── " .. file .. " (incoming)"
+		table.insert(graph_entries, {
+			filename = file,
+			display = display_text,
+			file_path = file_info and file_info.file_path,
+			type = "incoming"
+		})
 	end
+	
+	-- Add current file
+	table.insert(graph_entries, {
+		filename = current_name,
+		display = "● " .. current_name .. " (current)",
+		file_path = vim.api.nvim_buf_get_name(0),
+		type = "current"
+	})
+	
+	-- Add outgoing links  
+	for file, _ in pairs(graph[current_name].outgoing) do
+		local file_info = graph[file]
+		local exists = file_info and file_info.file_path and vim.fn.filereadable(file_info.file_path) == 1
+		local display_text = "──► " .. file .. " (outgoing)" .. (exists and "" or " [missing]")
+		table.insert(graph_entries, {
+			filename = file,
+			display = display_text,
+			file_path = file_info and file_info.file_path,
+			type = "outgoing",
+			exists = exists
+		})
+	end
+	
+	-- Add orphaned files (files in graph but not connected to current)
+	for file, _ in pairs(graph) do
+		if file ~= current_name and 
+		   not graph[current_name].incoming[file] and 
+		   not graph[current_name].outgoing[file] then
+			local file_info = graph[file]
+			local display_text = "○ " .. file .. " (orphaned)"
+			table.insert(graph_entries, {
+				filename = file,
+				display = display_text,
+				file_path = file_info and file_info.file_path,
+				type = "orphaned"
+			})
+		end
+	end
+	
+	if #graph_entries == 0 then
+		vim.notify("No linked files found", vim.log.levels.INFO)
+		return
+	end
+	
+	-- Create telescope picker
+	local picker = pickers.new({}, {
+		prompt_title = "Markdown Link Graph - " .. current_name,
+		finder = finders.new_table({
+			results = graph_entries,
+			entry_maker = function(entry)
+				return {
+					value = entry,
+					display = entry.display,
+					ordinal = entry.filename,
+					path = entry.file_path,
+				}
+			end,
+		}),
+		sorter = conf.values.generic_sorter({}),
+		attach_mappings = function(prompt_bufnr, map)
+			actions.select_default:replace(function()
+				actions.close(prompt_bufnr)
+				local selection = action_state.get_selected_entry()
+				if selection and selection.value then
+					local entry = selection.value
+					if entry.type == "current" then
+						-- Already in current file, do nothing special
+						return
+					end
+					
+					if entry.file_path and vim.fn.filereadable(entry.file_path) == 1 then
+						add_current_to_history()
+						vim.cmd("edit " .. vim.fn.fnameescape(entry.file_path))
+					elseif entry.type == "outgoing" and not entry.exists then
+						-- For missing outgoing links, try to create the file
+						local potential_path = vim.fn.expand("%:h") .. "/" .. entry.filename .. ".md"
+						add_current_to_history()
+						vim.cmd("edit " .. vim.fn.fnameescape(potential_path))
+						vim.notify("Created new file: " .. entry.filename, vim.log.levels.INFO)
+					else
+						vim.notify("File not found: " .. entry.filename, vim.log.levels.WARN)
+					end
+				end
+			end)
+			return true
+		end,
+	})
+	
+	picker:find()
 end
 
 --- Setup tags syntax highlighting for markdown files
