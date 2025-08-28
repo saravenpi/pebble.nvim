@@ -1,0 +1,40 @@
+filters:
+  and:
+    - status != "done"
+    - status != "cancelled"
+
+formulas:
+  days_until_due: 'due and tonumber(os.difftime(date(due), os.time()) / 86400) or nil'
+  priority_level: 'priority == "high" and "🔴" or priority == "medium" and "🟡" or "🟢"'
+  status_icon: 'status == "todo" and "⏳" or status == "in-progress" and "🔄" or status == "done" and "✅" or "❌"'
+
+display:
+  name:
+    displayName: "Task"
+  status:
+    displayName: "Status"
+  formula.status_icon:
+    displayName: "📊"
+  priority:
+    displayName: "Priority"
+  formula.priority_level:
+    displayName: "🎯"
+  due:
+    displayName: "Due Date"
+  formula.days_until_due:
+    displayName: "Days Left"
+  tags:
+    displayName: "Tags"
+
+views:
+  - type: table
+    name: "Active Tasks"
+    filters:
+      and:
+        - status != "done"
+        - status != "cancelled"
+    order:
+      - priority
+      - due
+      - name
+    limit: 50

@@ -1320,6 +1320,25 @@ function M.setup(opts)
 		M.init_yaml_header,
 		{ desc = "Initialize YAML header" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleBase",
+		function(opts)
+			local bases = require("pebble.bases")
+			if opts.args ~= "" then
+				bases.open_base(opts.args)
+			else
+				bases.open_current_base()
+			end
+		end,
+		{ desc = "Open a base view", nargs = "?", complete = "file" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleBases",
+		function()
+			require("pebble.bases").list_bases()
+		end,
+		{ desc = "List and select available bases" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1394,12 +1413,26 @@ function M.setup(opts)
 				)
 			end,
 		})
+		
+		vim.api.nvim_create_autocmd("FileType", {
+			pattern = "base",
+			callback = function()
+				local buf_opts = { buffer = true, silent = true }
+				vim.keymap.set(
+					"n",
+					"<leader>bo",
+					function() require("pebble.bases").open_current_base() end,
+					vim.tbl_extend("force", buf_opts, { desc = "Open current base view" })
+				)
+			end,
+		})
 	end
 
 	if opts.global_keymaps then
 		vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
-		vim.keymap.set("n", "<leader>mb", M.go_back, { desc = "Go back in markdown history" })
-		vim.keymap.set("n", "<leader>mf", M.go_forward, { desc = "Go forward in markdown history" })
+		vim.keymap.set("n", "<leader>mp", M.go_back, { desc = "Go to previous in markdown history" })
+		vim.keymap.set("n", "<leader>mn", M.go_forward, { desc = "Go to next in markdown history" })
+		vim.keymap.set("n", "<leader>mb", function() require("pebble.bases").list_bases() end, { desc = "List available bases" })
 	end
 end
 

@@ -1,4 +1,4 @@
-*pebble.txt*   Obsidian-style markdown link navigation for Neovim
+*pebble.txt*   Obsidian-style markdown link navigation and database views for Neovim
 
                     _______________
                    /               \
@@ -7,7 +7,7 @@
                          |
                     Markdown Links
 
-Author: Your Name
+Author: Saravenpi
 License: MIT
 Version: 1.0.0
 
@@ -21,12 +21,13 @@ CONTENTS                                                    *pebble-contents*
 5. Keymaps..............................|pebble-keymaps|
 6. Configuration........................|pebble-configuration|
 7. Features.............................|pebble-features|
-8. FAQ..................................|pebble-faq|
+8. Bases................................|pebble-bases|
+9. FAQ..................................|pebble-faq|
 
 ==============================================================================
 1. INTRODUCTION                                         *pebble-introduction*
 
-Pebble is a Neovim plugin that provides Obsidian-style markdown link 
+Pebble is a Neovim plugin that provides Obsidian-style markdown link
 navigation and management. It allows you to:
 
 • Navigate between markdown files using [[wiki-style]] links
@@ -34,6 +35,8 @@ navigation and management. It allows you to:
 • View an interactive graph of connected files
 • Navigate with history (back/forward)
 • Create links from selected text
+• Create database views with Obsidian-compatible .base files
+• Manage markdown headings and YAML frontmatter
 • Cache file lookups for performance
 
 ==============================================================================
@@ -88,26 +91,52 @@ Basic usage:
 *:PebbleStats*         Show cache performance statistics
 *:PebbleCreateLinkAndNavigate* Create link, file and navigate (visual mode)
 *:PebbleCreateLinkAndFile* Create link and file without navigation (visual mode)
+*:PebbleToggleChecklist* Toggle markdown checklist/todo item
+*:PebbleInitHeader*    Initialize YAML frontmatter header
+*:PebbleIncreaseHeading* Increase markdown heading level
+*:PebbleDecreaseHeading* Decrease markdown heading level
+*:PebbleBase*          Open a base view (current file or specified path)
+*:PebbleBases*         List and select available base files
 
 ==============================================================================
 5. KEYMAPS                                                   *pebble-keymaps*
 
-Default keymaps (markdown files only):
+Default keymaps (markdown files):
 
 *<CR>*           Follow link under cursor
-*<Tab>*          Next link in buffer  
+*<Tab>*          Next link in buffer
 *<S-Tab>*        Previous link in buffer
+*<Ctrl-t>*       Toggle markdown checklist
+*<leader>mt*     Toggle markdown checklist
 *<leader>mg*     Toggle graph view
 *<leader>mv*     Toggle visual graph view
-*<leader>mc*     Create link, file and navigate (visual mode)
-*<leader>ml*     Create link and file without navigation (visual mode)
+*<leader>mc*     Create link and navigate (visual mode)
+*<leader>ml*     Create link without navigation (visual mode)
+*<leader>mh*     Initialize YAML header
+*+*              Increase heading level
+*-*              Decrease heading level
 
-Optional global keymaps (disabled by default):
+Base files (.base):
 
-*<leader>mg*     Toggle link graph
+*<leader>bo*     Open current base view
+
+Base view navigation:
+
+*j* / *k*        Navigate rows
+*↑* / *↓*        Navigate rows
+*G*              Go to last item
+*gg*             Go to first item
+*<CR>*           Open selected file
+*r*              Refresh cache
+*q* / *<Esc>*    Close view
+
+Global keymaps (when global_keymaps = true):
+
+*<leader>mg*     Toggle graph view
 *<leader>mv*     Toggle visual graph view
-*<leader>mb*     Go back in history
-*<leader>mf*     Go forward in history
+*<leader>mp*     Go to previous in navigation history
+*<leader>mn*     Go to next in navigation history
+*<leader>mb*     List available bases
 
 ==============================================================================
 6. CONFIGURATION                                       *pebble-configuration*
@@ -116,7 +145,7 @@ Setup options: >
     require('pebble').setup({
         -- Automatically set up keymaps for markdown files
         auto_setup_keymaps = true,
-        
+
         -- Set up global keymaps (disabled by default)
         global_keymaps = false
     })
@@ -126,7 +155,7 @@ To disable automatic keymaps and set your own: >
     require('pebble').setup({
         auto_setup_keymaps = false
     })
-    
+
     -- Then set your own keymaps
     vim.keymap.set('n', 'gf', require('pebble').follow_link)
 <
@@ -162,7 +191,59 @@ Graph View Features:
 • Keyboard shortcuts: q/Esc to close, Enter to open
 
 ==============================================================================
-8. FAQ                                                           *pebble-faq*
+8. BASES                                                          *pebble-bases*
+
+Bases are Obsidian-compatible database views that allow you to create dynamic
+tables from your markdown files based on their frontmatter properties.
+
+Creating a Base File:
+Create a file with a .base extension containing YAML configuration.
+
+Basic Base Structure: >
+    # Filter which files to include
+    filters:
+      and:
+        - status != "done"
+        - priority == "high"
+    
+    # Create computed properties
+    formulas:
+      days_left: 'due and tonumber(os.difftime(date(due), os.time()) / 86400)'
+      status_icon: 'status == "todo" and "⏳" or "✅"'
+    
+    # Display names for columns
+    display:
+      name:
+        displayName: "Task"
+      formula.status_icon:
+        displayName: "📊"
+    
+    # Define table views
+    views:
+      - type: table
+        name: "My Tasks"
+        order:
+          - priority
+          - due
+        limit: 50
+<
+
+Supported Filter Operations:
+• Property comparisons: status == "todo", priority != "low"
+• Logical operations: and, or, not
+• File operations: file.hasTag("work"), file.inFolder("projects")
+
+Formula Functions:
+• date(str): Parse date string
+• now(): Current timestamp
+• if(condition, true_val, false_val): Conditional
+• concat(...): Concatenate strings
+• length(val): Get string/array length
+• Math operations: +, -, *, /
+• String methods: format, match, etc.
+
+==============================================================================
+9. FAQ                                                           *pebble-faq*
 
 Q: How does file lookup work?
 A: Pebble builds a cache of all .md files in your git repository (or current
@@ -183,6 +264,17 @@ A: The cache automatically invalidates when files are created, modified, or
 Q: Why is the graph view limited to 200 files?
 A: This prevents performance issues in large repositories. The limit can be
    adjusted by modifying MAX_FILES_TO_SCAN in the source code.
+
+Q: Are .base files compatible with Obsidian?
+A: Yes! Pebble's .base files use the same YAML format as Obsidian 2025 Bases.
+   You can create them in Obsidian and view them in Neovim, or vice versa.
+
+Q: How do I refresh a base view?
+A: Press 'r' while in a base view to refresh the cache and reload data.
+
+Q: Can I have multiple views in one base file?
+A: Yes! Add multiple entries to the 'views' array. Currently only table views
+   are supported, but each can have different filters and sorting.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:
