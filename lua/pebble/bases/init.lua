@@ -112,12 +112,14 @@ end
 function M.open_current_base()
 	local current_file = vim.fn.expand("%:p")
 	
-	if not current_file:match("%.base$") then
-		vim.notify("Current file is not a .base file", vim.log.levels.WARN)
-		return
+	if current_file:match("%.base$") then
+		-- If currently in a .base file, open it
+		M.open_base(current_file)
+	else
+		-- If not in a .base file, show list of available bases
+		vim.notify("Not currently in a .base file. Showing available bases...", vim.log.levels.INFO)
+		M.list_bases()
 	end
-	
-	M.open_base(current_file)
 end
 
 function M.list_bases()

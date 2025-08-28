@@ -1433,7 +1433,7 @@ function M.setup(opts)
 		vim.keymap.set("n", "<leader>mp", M.go_back, { desc = "Go to previous in markdown history" })
 		vim.keymap.set("n", "<leader>mn", M.go_forward, { desc = "Go to next in markdown history" })
 		vim.keymap.set("n", "<leader>mB", function() require("pebble.bases").list_bases() end, { desc = "List available bases" })
-		vim.keymap.set("n", "<leader>mb", function() require("pebble.bases").open_current_base() end, { desc = "Open current base view" })
+		vim.keymap.set("n", "<leader>mb", function() require("pebble.bases").open_current_base() end, { desc = "Open current/select base view" })
 	end
 end
 
