@@ -138,12 +138,22 @@ end
 
 --- Get the link under the cursor and determine its type
 local function get_link_under_cursor()
-	local line = vim.api.nvim_get_current_line()
-	local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+	-- Safety check
+	local success, line = pcall(vim.api.nvim_get_current_line)
+	if not success or not line then
+		return nil, nil
+	end
+	
+	local cursor_result = vim.api.nvim_win_get_cursor(0)
+	if not cursor_result or not cursor_result[2] then
+		return nil, nil
+	end
+	
+	local col = cursor_result[2] + 1
 
 	-- Find all obsidian links in the line
 	local start_pos = 1
-	while true do
+	while start_pos <= #line do
 		local obsidian_start, obsidian_end = line:find("%[%[[^%]]*%]%]", start_pos)
 		if not obsidian_start then
 			break
@@ -151,30 +161,36 @@ local function get_link_under_cursor()
 		
 		if col >= obsidian_start and col <= obsidian_end then
 			local link_text = line:sub(obsidian_start + 2, obsidian_end - 2)
-			return link_text, "obsidian"
+			if link_text and link_text ~= "" then
+				return link_text, "obsidian"
+			end
 		end
 		
 		start_pos = obsidian_end + 1
+		if start_pos > #line then break end
 	end
 
 	-- Find all markdown links in the line
 	start_pos = 1
-	while true do
+	while start_pos <= #line do
 		local md_start, md_end = line:find("%[[^%]]*%]%([^%)]*%)", start_pos)
 		if not md_start then
 			break
 		end
 		
 		if col >= md_start and col <= md_end then
-			local paren_start = line:find("%(", md_start)
-			local paren_end = line:find("%)", paren_start)
-			if paren_start and paren_end then
-				local link_url = line:sub(paren_start + 1, paren_end - 1)
-				return link_url, "markdown"
+			-- Find parentheses within this specific link match
+			local paren_start, paren_end = line:find("%]%(([^%)]*)%)", md_start)
+			if paren_start and paren_end and paren_start + 2 <= paren_end - 1 then
+				local link_url = line:sub(paren_start + 2, paren_end - 1) -- +2 to skip ](, -1 to skip )
+				if link_url and link_url ~= "" then
+					return link_url, "markdown"
+				end
 			end
 		end
 		
 		start_pos = md_end + 1
+		if start_pos > #line then break end
 	end
 
 	return nil, nil
@@ -388,10 +404,15 @@ end
 
 --- Follow the link under cursor or fallback to default Enter behavior
 function M.follow_link()
-	local link, link_type = get_link_under_cursor()
-	if link and link_type then
-		open_link(link, link_type)
+	-- Wrap in pcall for safety
+	local success, link, link_type = pcall(get_link_under_cursor)
+	if success and link and link_type and link ~= "" then
+		local open_success, err = pcall(open_link, link, link_type)
+		if not open_success then
+			vim.notify("Error opening link: " .. (err or "unknown error"), vim.log.levels.ERROR)
+		end
 	else
+		-- Fallback to default Enter behavior
 		vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "n", false)
 	end
 end
