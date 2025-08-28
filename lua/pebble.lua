@@ -1339,6 +1339,15 @@ function M.setup(opts)
 		end,
 		{ desc = "List and select available bases" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleBasesDebug",
+		function()
+			local debug = require("pebble.bases.debug")
+			debug.enable_production_debugging("/tmp/pebble-bases-debug.log")
+			debug.health_check()
+		end,
+		{ desc = "Enable bases debug logging for troubleshooting" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
