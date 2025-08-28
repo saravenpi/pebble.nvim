@@ -7,8 +7,8 @@ local CACHE_TTL = 5000
 
 local function get_markdown_files(root_dir)
 	local files = {}
-	-- Performance: Use find with explicit limits to prevent hanging on large repositories
-	local cmd = string.format([[find '%s' -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' ! -path '*/target/*' ! -path '*/.venv/*' ! -path '*/.tox/*' | head -n 2000 2>/dev/null]], root_dir)
+	-- Performance: Drastically limit file scanning to prevent freezing
+	local cmd = string.format([[find '%s' -maxdepth 2 -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' ! -path '*/target/*' ! -path '*/.venv/*' ! -path '*/.tox/*' | head -n 50 2>/dev/null]], root_dir)
 	local result = vim.fn.system(cmd)
 	
 	if vim.v.shell_error == 0 and result ~= "" then
@@ -23,11 +23,11 @@ local function get_markdown_files(root_dir)
 	-- If no files found with find, try Lua-based recursive search as fallback (with limits)
 	if #files == 0 then
 		local scan_count = 0
-		local MAX_SCAN_FILES = 1000  -- Performance limit
+		local MAX_SCAN_FILES = 50  -- Performance limit - drastically reduced
 		
 		local function scan_dir(dir, depth)
 			-- Performance: Limit recursion depth
-			if depth > 10 or scan_count > MAX_SCAN_FILES then
+			if depth > 2 or scan_count > MAX_SCAN_FILES then
 				return
 			end
 			
@@ -120,7 +120,11 @@ function M.get_file_data(root_dir, force_refresh)
 	local files = get_markdown_files(root_dir)
 	local file_data = {}
 	
-	for _, path in ipairs(files) do
+	-- Performance: Limit file processing to prevent freezing
+	local max_files = math.min(#files, 50)
+	
+	for i = 1, max_files do
+		local path = files[i]
 		-- Safely process each file
 		local ok, result = pcall(function()
 			local stat = vim.loop.fs_stat(path)
