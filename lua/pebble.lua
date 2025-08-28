@@ -923,11 +923,13 @@ local function build_simple_graph(current_name)
 		if link_name ~= "" and link_name ~= current_name then
 			graph[current_name].outgoing[link_name] = true
 			
-			-- Initialize target node (minimal data for performance)
+			-- Initialize target node (minimal data, no file scanning)
 			if not graph[link_name] then
-				local target_path = find_markdown_file(link_name)
+				-- Don't call find_markdown_file to avoid cache building/scanning
+				-- Just create a placeholder path
+				local target_path = vim.fn.expand("%:h") .. "/" .. link_name .. ".md"
 				graph[link_name] = {
-					file_path = target_path,
+					file_path = vim.fn.filereadable(target_path) == 1 and target_path or nil,
 					outgoing = {},
 					incoming = {}, -- Keep structure but don't populate
 				}
