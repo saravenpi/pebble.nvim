@@ -679,6 +679,44 @@ function M.decrease_heading()
 	end
 end
 
+--- Initialize YAML header if not present
+function M.init_yaml_header()
+	-- Check if buffer is empty or if YAML header already exists
+	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	
+	-- If buffer is empty or first line is not YAML start, add header
+	if #lines == 0 or lines[1] ~= "---" then
+		-- Get the current file name for title
+		local current_file = vim.api.nvim_buf_get_name(0)
+		local title = "Untitled"
+		
+		if current_file and current_file ~= "" then
+			title = vim.fn.fnamemodify(current_file, ":t:r")
+		end
+		
+		-- Create default YAML header
+		local yaml_header = {
+			"---",
+			"title: " .. title,
+			"aliases: []",
+			"tags: []",
+			"created: " .. os.date("%Y-%m-%d"),
+			"---",
+			""
+		}
+		
+		-- Insert at the beginning of the buffer
+		vim.api.nvim_buf_set_lines(0, 0, 0, false, yaml_header)
+		
+		-- Position cursor after the header
+		vim.api.nvim_win_set_cursor(0, {#yaml_header + 1, 0})
+		
+		vim.notify("YAML header initialized", vim.log.levels.INFO)
+	else
+		vim.notify("YAML header already exists", vim.log.levels.INFO)
+	end
+end
+
 --- Extract text from current visual selection
 local function get_visual_selection()
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
@@ -1277,6 +1315,11 @@ function M.setup(opts)
 		M.decrease_heading,
 		{ desc = "Decrease markdown heading level" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleInitHeader",
+		M.init_yaml_header,
+		{ desc = "Initialize YAML header" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1342,6 +1385,12 @@ function M.setup(opts)
 					"-",
 					M.decrease_heading,
 					vim.tbl_extend("force", buf_opts, { desc = "Decrease heading level" })
+				)
+				vim.keymap.set(
+					"n",
+					"<leader>mh",
+					M.init_yaml_header,
+					vim.tbl_extend("force", buf_opts, { desc = "Initialize YAML header" })
 				)
 			end,
 		})

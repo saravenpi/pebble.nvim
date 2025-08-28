@@ -73,6 +73,7 @@ use {
 | `:PebbleToggleChecklist` | Toggle markdown checklist/todo item |
 | `:PebbleCreateLinkAndNavigate` | Create link, file and navigate (visual mode) |
 | `:PebbleCreateLinkAndFile` | Create link and file without navigation (visual mode) |
+| `:PebbleInitHeader` | Initialize YAML header if not present |
 
 ## Default Keymaps
 
@@ -85,6 +86,7 @@ use {
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mc` - Create link, file and navigate (visual mode)
 - `<leader>ml` - Create link and file without navigation (visual mode)
+- `<leader>mh` - Initialize YAML header
 
 ### Optional Global Keymaps
 Set `global_keymaps = true` in setup to enable:
