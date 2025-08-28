@@ -20,7 +20,8 @@ local function parse_yaml_frontmatter(file_path)
 		return nil
 	end
 	
-	local lines = vim.fn.readfile(file_path, "", 20) -- Read first 20 lines for frontmatter
+	-- Only read first 10 lines for performance - frontmatter should be at the top
+	local lines = vim.fn.readfile(file_path, "", 10)
 	if not lines or #lines == 0 then
 		return nil
 	end
@@ -77,10 +78,36 @@ local function parse_yaml_frontmatter(file_path)
 	return end_found and frontmatter or nil
 end
 
+--- Build alias cache on demand for a specific file
+local function ensure_file_alias(file_path)
+	if alias_cache[file_path] ~= nil then
+		return -- Already cached
+	end
+	
+	local frontmatter = parse_yaml_frontmatter(file_path)
+	if frontmatter then
+		-- Handle single alias
+		if frontmatter.alias and type(frontmatter.alias) == "string" then
+			alias_cache[frontmatter.alias:lower()] = file_path
+		end
+		-- Handle multiple aliases
+		if frontmatter.aliases and type(frontmatter.aliases) == "table" then
+			for _, alias in ipairs(frontmatter.aliases) do
+				if type(alias) == "string" then
+					alias_cache[alias:lower()] = file_path
+				end
+			end
+		end
+	end
+	
+	-- Mark as processed (even if no aliases found)
+	alias_cache[file_path] = true
+end
+
 --- Build cache of all markdown files in the current repository or directory
 local function build_file_cache()
 	file_cache = {}
-	alias_cache = {}
+	-- Don't clear alias_cache - keep it for performance
 	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
 	local cwd = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
 
@@ -99,23 +126,6 @@ local function build_file_cache()
 			file_cache[filename] = {}
 		end
 		table.insert(file_cache[filename], file_path)
-		
-		-- Parse YAML frontmatter for aliases
-		local frontmatter = parse_yaml_frontmatter(file_path)
-		if frontmatter then
-			-- Handle single alias
-			if frontmatter.alias and type(frontmatter.alias) == "string" then
-				alias_cache[frontmatter.alias:lower()] = file_path
-			end
-			-- Handle multiple aliases
-			if frontmatter.aliases and type(frontmatter.aliases) == "table" then
-				for _, alias in ipairs(frontmatter.aliases) do
-					if type(alias) == "string" then
-						alias_cache[alias:lower()] = file_path
-					end
-				end
-			end
-		end
 	end
 
 	cache_valid = true
@@ -206,9 +216,10 @@ local function find_markdown_file(filename)
 		build_file_cache()
 	end
 
-	-- First, check if it's an alias (case-insensitive)
-	local alias_match = alias_cache[filename:lower()]
-	if alias_match then
+	-- Check if it's an alias (case-insensitive) - but only search existing aliases
+	local filename_lower = filename:lower()
+	local alias_match = alias_cache[filename_lower]
+	if alias_match and type(alias_match) == "string" then
 		return alias_match
 	end
 
@@ -253,6 +264,21 @@ local function find_markdown_file(filename)
 					end
 				end
 				return file_paths[1]
+			end
+		end
+	end
+	
+	-- If no filename match found, do a lazy search for aliases
+	-- Only check files that haven't been processed yet
+	for _, file_paths in pairs(file_cache) do
+		for _, file_path in ipairs(file_paths) do
+			if alias_cache[file_path] == nil then
+				ensure_file_alias(file_path)
+				-- Check if we found the alias we're looking for
+				local found_alias = alias_cache[filename_lower]
+				if found_alias and type(found_alias) == "string" then
+					return found_alias
+				end
 			end
 		end
 	end
