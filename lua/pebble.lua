@@ -1,6 +1,7 @@
 local M = {}
 
 local file_cache = {}
+local alias_cache = {}
 local cache_valid = false
 local navigation_history = {}
 local current_history_index = 0
@@ -13,9 +14,73 @@ local graph_cache_timestamp = 0
 local GRAPH_CACHE_TTL = 5000
 local MAX_FILES_TO_SCAN = 200
 
+--- Parse YAML frontmatter from file content and extract aliases
+local function parse_yaml_frontmatter(file_path)
+	if not vim.fn.filereadable(file_path) then
+		return nil
+	end
+	
+	local lines = vim.fn.readfile(file_path, "", 20) -- Read first 20 lines for frontmatter
+	if not lines or #lines == 0 then
+		return nil
+	end
+	
+	-- Check if file starts with YAML frontmatter
+	if lines[1] ~= "---" then
+		return nil
+	end
+	
+	local frontmatter = {}
+	local in_frontmatter = true
+	local end_found = false
+	
+	local i = 2
+	while i <= #lines do
+		local line = lines[i]
+		if line == "---" then
+			end_found = true
+			break
+		elseif line == "..." then
+			end_found = true
+			break
+		end
+		
+		-- Parse simple YAML key-value pairs and arrays
+		local key, value = line:match("^([%w_%-]+):%s*(.*)$")
+		if key then
+			-- Handle arrays (simple case: "- item")
+			if value == "" and i + 1 <= #lines and lines[i + 1]:match("^%s*%- ") then
+				local array_items = {}
+				local j = i + 1
+				while j <= #lines and lines[j]:match("^%s*%- ") do
+					local item = lines[j]:match("^%s*%-%s*(.+)$")
+					if item then
+						-- Remove quotes if present
+						item = item:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+						table.insert(array_items, item)
+					end
+					j = j + 1
+				end
+				frontmatter[key] = array_items
+				i = j  -- Skip the processed array items
+			else
+				-- Remove quotes if present
+				value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
+				frontmatter[key] = value
+				i = i + 1
+			end
+		else
+			i = i + 1
+		end
+	end
+	
+	return end_found and frontmatter or nil
+end
+
 --- Build cache of all markdown files in the current repository or directory
 local function build_file_cache()
 	file_cache = {}
+	alias_cache = {}
 	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
 	local cwd = (vim.v.shell_error == 0 and git_root ~= "") and git_root or vim.fn.getcwd()
 
@@ -34,6 +99,23 @@ local function build_file_cache()
 			file_cache[filename] = {}
 		end
 		table.insert(file_cache[filename], file_path)
+		
+		-- Parse YAML frontmatter for aliases
+		local frontmatter = parse_yaml_frontmatter(file_path)
+		if frontmatter then
+			-- Handle single alias
+			if frontmatter.alias and type(frontmatter.alias) == "string" then
+				alias_cache[frontmatter.alias:lower()] = file_path
+			end
+			-- Handle multiple aliases
+			if frontmatter.aliases and type(frontmatter.aliases) == "table" then
+				for _, alias in ipairs(frontmatter.aliases) do
+					if type(alias) == "string" then
+						alias_cache[alias:lower()] = file_path
+					end
+				end
+			end
+		end
 	end
 
 	cache_valid = true
@@ -42,12 +124,14 @@ end
 --- Invalidate the file cache when files change
 local function invalidate_cache()
 	cache_valid = false
+	alias_cache = {}
 end
 
 --- Invalidate all caches including graph and link caches
 local function invalidate_graph_caches()
 	graph_cache = {}
 	link_cache = {}
+	alias_cache = {}
 	cache_valid = false
 	graph_cache_timestamp = 0
 end
@@ -57,20 +141,40 @@ local function get_link_under_cursor()
 	local line = vim.api.nvim_get_current_line()
 	local col = vim.api.nvim_win_get_cursor(0)[2] + 1
 
-	local obsidian_start, obsidian_end = line:find("%[%[[^%]]*%]%]")
-	if obsidian_start and obsidian_end and col >= obsidian_start and col <= obsidian_end then
-		local link_text = line:sub(obsidian_start + 2, obsidian_end - 2)
-		return link_text, "obsidian"
+	-- Find all obsidian links in the line
+	local start_pos = 1
+	while true do
+		local obsidian_start, obsidian_end = line:find("%[%[[^%]]*%]%]", start_pos)
+		if not obsidian_start then
+			break
+		end
+		
+		if col >= obsidian_start and col <= obsidian_end then
+			local link_text = line:sub(obsidian_start + 2, obsidian_end - 2)
+			return link_text, "obsidian"
+		end
+		
+		start_pos = obsidian_end + 1
 	end
 
-	local md_start, md_end = line:find("%[[^%]]*%]%([^%)]*%)")
-	if md_start and md_end and col >= md_start and col <= md_end then
-		local paren_start = line:find("%(", md_start)
-		local paren_end = line:find("%)", paren_start)
-		if paren_start and paren_end then
-			local link_url = line:sub(paren_start + 1, paren_end - 1)
-			return link_url, "markdown"
+	-- Find all markdown links in the line
+	start_pos = 1
+	while true do
+		local md_start, md_end = line:find("%[[^%]]*%]%([^%)]*%)", start_pos)
+		if not md_start then
+			break
 		end
+		
+		if col >= md_start and col <= md_end then
+			local paren_start = line:find("%(", md_start)
+			local paren_end = line:find("%)", paren_start)
+			if paren_start and paren_end then
+				local link_url = line:sub(paren_start + 1, paren_end - 1)
+				return link_url, "markdown"
+			end
+		end
+		
+		start_pos = md_end + 1
 	end
 
 	return nil, nil
@@ -86,7 +190,15 @@ local function find_markdown_file(filename)
 		build_file_cache()
 	end
 
+	-- First, check if it's an alias (case-insensitive)
+	local alias_match = alias_cache[filename:lower()]
+	if alias_match then
+		return alias_match
+	end
+
 	local search_name = filename:gsub("%.md$", "")
+	
+	-- Try exact match first
 	local matches = file_cache[search_name]
 	if matches and #matches > 0 then
 		-- Prioritize files in the same directory as the current buffer
@@ -105,6 +217,28 @@ local function find_markdown_file(filename)
 
 		-- If no file found in current directory, return the first match
 		return matches[1]
+	end
+	
+	-- Try case-insensitive match if exact match fails
+	local search_name_lower = search_name:lower()
+	for filename_key, file_paths in pairs(file_cache) do
+		if filename_key:lower() == search_name_lower then
+			if file_paths and #file_paths > 0 then
+				-- Apply same directory prioritization
+				local current_file = vim.api.nvim_buf_get_name(0)
+				if current_file and current_file ~= "" and current_file:match("%.md$") then
+					local current_dir = vim.fn.fnamemodify(current_file, ":h")
+
+					for _, file_path in ipairs(file_paths) do
+						local file_dir = vim.fn.fnamemodify(file_path, ":h")
+						if file_dir == current_dir then
+							return file_path
+						end
+					end
+				end
+				return file_paths[1]
+			end
+		end
 	end
 
 	return nil
@@ -268,22 +402,40 @@ local function find_all_links()
 	local links = {}
 
 	for line_num, line in ipairs(lines) do
-		for start_pos, end_pos in line:gmatch("()%[%[[^%]]*%]%]()") do
+		-- Find all obsidian links in the line
+		local start_pos = 1
+		while true do
+			local obs_start, obs_end = line:find("%[%[[^%]]*%]%]", start_pos)
+			if not obs_start then
+				break
+			end
+			
 			table.insert(links, {
 				line = line_num,
-				col = start_pos,
-				end_col = end_pos - 1,
+				col = obs_start,
+				end_col = obs_end,
 				type = "obsidian",
 			})
+			
+			start_pos = obs_end + 1
 		end
 
-		for start_pos, end_pos in line:gmatch("()%[[^%]]*%]%([^%)]*%)()") do
+		-- Find all markdown links in the line
+		start_pos = 1
+		while true do
+			local md_start, md_end = line:find("%[[^%]]*%]%([^%)]*%)", start_pos)
+			if not md_start then
+				break
+			end
+			
 			table.insert(links, {
 				line = line_num,
-				col = start_pos,
-				end_col = end_pos - 1,
+				col = md_start,
+				end_col = md_end,
 				type = "markdown",
 			})
+			
+			start_pos = md_end + 1
 		end
 	end
 
@@ -1002,9 +1154,34 @@ function M.toggle_graph()
 	end
 end
 
+--- Setup tags syntax highlighting for markdown files
+local function setup_tags_syntax(opts)
+	opts = opts or {}
+	local enable_tags = opts.enable_tags ~= false -- Default to true
+	local tag_color = opts.tag_highlight or "Special"
+	
+	if not enable_tags then
+		return
+	end
+	
+	vim.api.nvim_create_autocmd("FileType", {
+		pattern = "markdown",
+		callback = function()
+			-- Add hashtag syntax highlighting - improved pattern to handle more cases
+			vim.cmd([[
+				syntax match PebbleTag /#[a-zA-Z0-9_-]\+/ containedin=ALL
+				highlight link PebbleTag ]] .. tag_color .. [[
+			]])
+		end,
+	})
+end
+
 --- Initialize the plugin with configuration options
 function M.setup(opts)
 	opts = opts or {}
+
+	-- Setup tags syntax highlighting
+	setup_tags_syntax(opts)
 
 	vim.api.nvim_create_autocmd({ "BufWritePost", "BufNewFile", "BufDelete" }, {
 		pattern = "*.md",
