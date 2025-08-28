@@ -285,7 +285,6 @@ function M.open_base_view(base_data, files)
 	vim.api.nvim_buf_set_lines(base_view_buf, 0, -1, false, lines)
 	vim.api.nvim_buf_set_option(base_view_buf, 'modifiable', false)
 	
-	vim.api.nvim_create_namespace("pebble_base_highlights")
 	local ns = vim.api.nvim_create_namespace("pebble_base_highlights")
 	
 	vim.api.nvim_set_hl(0, "PebbleBaseSelection", { bg = "#4a4a4a", bold = true })
@@ -301,8 +300,20 @@ function M.open_base_view(base_data, files)
 	
 	local function move_selection(delta)
 		if #files == 0 then return end
+		if not base_view_buf or not vim.api.nvim_buf_is_valid(base_view_buf) then return end
+		if not base_view_win or not vim.api.nvim_win_is_valid(base_view_win) then return end
+		
 		current_selection = math.max(1, math.min(#files, current_selection + delta))
-		local lines, highlights = M.render_view(files, view_config, display_config)
+		
+		local lines, highlights = {}, {}
+		local ok, result_lines, result_highlights = pcall(M.render_view, files, view_config, display_config)
+		if ok then
+			lines = result_lines or {}
+			highlights = result_highlights or {}
+		else
+			return -- Don't update if rendering fails
+		end
+		
 		vim.api.nvim_buf_set_option(base_view_buf, 'modifiable', true)
 		vim.api.nvim_buf_set_lines(base_view_buf, 0, -1, false, lines)
 		vim.api.nvim_buf_set_option(base_view_buf, 'modifiable', false)
@@ -321,12 +332,13 @@ function M.open_base_view(base_data, files)
 	end
 	
 	local function open_selected()
-		if current_view_data and current_view_data[current_selection] then
-			local file = current_view_data[current_selection]
-			if file.path and vim.fn.filereadable(file.path) == 1 then
-				vim.api.nvim_win_close(base_view_win, true)
-				vim.cmd('edit ' .. vim.fn.fnameescape(file.path))
-			end
+		if not current_view_data or not current_view_data[current_selection] then return end
+		if not base_view_win or not vim.api.nvim_win_is_valid(base_view_win) then return end
+		
+		local file = current_view_data[current_selection]
+		if file and file.path and vim.fn.filereadable(file.path) == 1 then
+			pcall(vim.api.nvim_win_close, base_view_win, true)
+			pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(file.path))
 		end
 	end
 	
