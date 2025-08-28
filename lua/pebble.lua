@@ -923,16 +923,16 @@ local function build_simple_graph(current_name)
 		if link_name ~= "" and link_name ~= current_name then
 			graph[current_name].outgoing[link_name] = true
 			
-			-- Initialize target node
+			-- Initialize target node (minimal data for performance)
 			if not graph[link_name] then
 				local target_path = find_markdown_file(link_name)
 				graph[link_name] = {
 					file_path = target_path,
 					outgoing = {},
-					incoming = {},
+					incoming = {}, -- Keep structure but don't populate
 				}
 			end
-			graph[link_name].incoming[current_name] = true
+			-- Don't populate incoming links to avoid scanning requirement
 		end
 	end
 	
@@ -996,17 +996,8 @@ function M.toggle_graph()
 	-- Create a list of all linked files for telescope
 	local graph_entries = {}
 	
-	-- Add incoming links
-	for file, _ in pairs(graph[current_name].incoming) do
-		local file_info = graph[file]
-		local display_text = "◄── " .. file .. " (incoming)"
-		table.insert(graph_entries, {
-			filename = file,
-			display = display_text,
-			file_path = file_info and file_info.file_path,
-			type = "incoming"
-		})
-	end
+	-- Skip incoming links detection to prevent performance issues
+	-- (Finding incoming links requires scanning all files, causing freezes)
 	
 	-- Add current file
 	table.insert(graph_entries, {
@@ -1030,21 +1021,7 @@ function M.toggle_graph()
 		})
 	end
 	
-	-- Add orphaned files (files in graph but not connected to current)
-	for file, _ in pairs(graph) do
-		if file ~= current_name and 
-		   not graph[current_name].incoming[file] and 
-		   not graph[current_name].outgoing[file] then
-			local file_info = graph[file]
-			local display_text = "○ " .. file .. " (orphaned)"
-			table.insert(graph_entries, {
-				filename = file,
-				display = display_text,
-				file_path = file_info and file_info.file_path,
-				type = "orphaned"
-			})
-		end
-	end
+	-- Skip orphaned files detection to maintain performance
 	
 	if #graph_entries == 0 then
 		vim.notify("No linked files found", vim.log.levels.INFO)
