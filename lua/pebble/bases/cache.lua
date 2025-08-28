@@ -8,13 +8,19 @@ local CACHE_TTL = 5000
 local function get_markdown_files(root_dir)
 	local files = {}
 	-- Performance: Drastically limit file scanning to prevent freezing
-	local cmd = string.format([[find '%s' -maxdepth 2 -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' ! -path '*/target/*' ! -path '*/.venv/*' ! -path '*/.tox/*' | head -n 50 2>/dev/null]], root_dir)
-	local result = vim.fn.system(cmd)
+	local cmd = string.format([[find '%s' -maxdepth 3 -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' ! -path '*/target/*' ! -path '*/.venv/*' ! -path '*/.tox/*' | head -n 100 2>/dev/null]], root_dir)
 	
-	if vim.v.shell_error == 0 and result ~= "" then
-		for path in result:gmatch("[^\n]+") do
-			if path ~= "" and vim.fn.filereadable(path) == 1 then
-				table.insert(files, path)
+	-- Use timeout to prevent hanging
+	local handle = io.popen(cmd)
+	if handle then
+		local result = handle:read("*a")
+		handle:close()
+		
+		if result and result ~= "" then
+			for path in result:gmatch("[^\n]+") do
+				if path ~= "" and vim.fn.filereadable(path) == 1 then
+					table.insert(files, path)
+				end
 			end
 		end
 	end
@@ -23,35 +29,45 @@ local function get_markdown_files(root_dir)
 	-- If no files found with find, try Lua-based recursive search as fallback (with limits)
 	if #files == 0 then
 		local scan_count = 0
-		local MAX_SCAN_FILES = 50  -- Performance limit - drastically reduced
+		local MAX_SCAN_FILES = 100  -- Increased slightly but still limited
 		
 		local function scan_dir(dir, depth)
 			-- Performance: Limit recursion depth
-			if depth > 2 or scan_count > MAX_SCAN_FILES then
+			if depth > 3 or scan_count > MAX_SCAN_FILES then
 				return
 			end
 			
-			-- Safely attempt to read directory
+			-- Safely attempt to read directory with timeout protection
 			local ok, items = pcall(vim.fn.readdir, dir)
 			if not ok or not items then
 				return -- Skip this directory if readdir fails
 			end
 			
+			-- Process files first (faster)
 			for _, item in ipairs(items) do
 				if scan_count > MAX_SCAN_FILES then break end
 				
 				local full_path = dir .. "/" .. item
-				local stat = vim.loop.fs_stat(full_path)
-				if stat then
-					if stat.type == "directory" and not item:match("^%.") and 
-					   item ~= "node_modules" and item ~= ".git" and item ~= ".obsidian" and 
-					   item ~= "build" and item ~= "dist" and item ~= "target" and
-					   item ~= ".venv" and item ~= ".tox" then
-						scan_dir(full_path, depth + 1)
-					elseif stat.type == "file" and (item:match("%.md$") or item:match("%.markdown$")) then
+				local ok_stat, stat = pcall(vim.loop.fs_stat, full_path)
+				if ok_stat and stat then
+					if stat.type == "file" and (item:match("%.md$") or item:match("%.markdown$")) then
 						table.insert(files, full_path)
 						scan_count = scan_count + 1
 					end
+				end
+			end
+			
+			-- Then process directories
+			for _, item in ipairs(items) do
+				if scan_count > MAX_SCAN_FILES then break end
+				
+				local full_path = dir .. "/" .. item
+				local ok_stat, stat = pcall(vim.loop.fs_stat, full_path)
+				if ok_stat and stat and stat.type == "directory" and not item:match("^%.") and 
+				   item ~= "node_modules" and item ~= ".git" and item ~= ".obsidian" and 
+				   item ~= "build" and item ~= "dist" and item ~= "target" and
+				   item ~= ".venv" and item ~= ".tox" then
+					scan_dir(full_path, depth + 1)
 				end
 			end
 		end
@@ -121,7 +137,7 @@ function M.get_file_data(root_dir, force_refresh)
 	local file_data = {}
 	
 	-- Performance: Limit file processing to prevent freezing
-	local max_files = math.min(#files, 50)
+	local max_files = math.min(#files, 200)  -- Increased limit but still reasonable
 	
 	for i = 1, max_files do
 		local path = files[i]

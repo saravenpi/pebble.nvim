@@ -70,7 +70,8 @@ local function get_display_columns(files, view_config, display_config)
 		
 		-- Add priority columns if they exist in files
 		for _, col in ipairs(priority_cols) do
-			for _, file in ipairs(files) do
+			for i, file in ipairs(files) do
+				if i > 10 then break end -- Limit iteration for performance
 				if type(file) == "table" and file[col] ~= nil and not seen[col] then
 					seen[col] = true
 					table.insert(columns, col)
@@ -80,21 +81,25 @@ local function get_display_columns(files, view_config, display_config)
 		end
 		
 		-- Performance: Add other columns (limited to prevent excessive processing)
-		local file_limit = math.min(#files, 25)  -- Reduced for performance
+		local file_limit = math.min(#files, 10)  -- Further reduced for performance
 		for i = 1, file_limit do
 			local file = files[i]
 			if type(file) == "table" then
+				local key_count = 0
 				for key, _ in pairs(file) do
+					key_count = key_count + 1
+					if key_count > 20 then break end -- Prevent processing files with too many keys
+					
 					if not seen[key] and not key:match("^_") and not key:match("^path$") then
 						seen[key] = true
 						table.insert(columns, key)
-						if #columns >= 8 then -- Limit to 10 columns for telescope display
+						if #columns >= 6 then -- Reduced column limit for better performance
 							break
 						end
 					end
 				end
 			end
-			if #columns >= 10 then
+			if #columns >= 6 then
 				break
 			end
 		end
@@ -158,9 +163,11 @@ function M.open_base_view(base_data, files)
 	
 	files = files or {}
 	
+	-- Improved handling for empty files
 	if #files == 0 then
-		vim.notify("No items found to display", vim.log.levels.INFO)
-		return
+		vim.notify("No items match the base criteria. Try checking your filters or adding markdown files to the directory.", vim.log.levels.WARN)
+		-- Still show telescope with empty results instead of returning
+		-- This allows users to see the base is working but just has no matches
 	end
 	
 	local view_config = base_data.views and base_data.views[1] or {}
@@ -178,10 +185,21 @@ function M.open_base_view(base_data, files)
 	
 	-- Limit files to prevent performance issues
 	local display_files = {}
-	local limit = math.min(view_config.limit or 500, 1000) -- Hard limit of 1000
-	for i = 1, math.min(#files, limit) do
-		if type(files[i]) == "table" then
-			table.insert(display_files, files[i])
+	local limit = math.min(view_config.limit or 1000, 2000) -- Increased reasonable limit
+	
+	-- Handle empty files case
+	if #files == 0 then
+		-- Create a dummy entry to show the picker with a helpful message
+		display_files = {{
+			name = "No items found",
+			path = "",
+			_empty = true
+		}}
+	else
+		for i = 1, math.min(#files, limit) do
+			if type(files[i]) == "table" then
+				table.insert(display_files, files[i])
+			end
 		end
 	end
 	
@@ -190,6 +208,16 @@ function M.open_base_view(base_data, files)
 		finder = finders.new_table({
 			results = display_files,
 			entry_maker = function(file)
+				-- Handle empty state
+				if file._empty then
+					return {
+						value = file,
+						display = "No items found - check your base filters or add markdown files",
+						path = "",
+						ordinal = "no items",
+					}
+				end
+				
 				local display = create_display_entry(file, columns, display_config)
 				return {
 					value = file,
@@ -204,12 +232,21 @@ function M.open_base_view(base_data, files)
 			actions.select_default:replace(function()
 				actions.close(prompt_bufnr)
 				local selection = action_state.get_selected_entry()
-				if selection and selection.value and selection.value.path then
+				
+				-- Handle empty state
+				if selection and selection.value and selection.value._empty then
+					vim.notify("No files to open. Try adjusting your base filters or adding markdown files to your directory.", vim.log.levels.INFO)
+					return
+				end
+				
+				if selection and selection.value and selection.value.path and selection.value.path ~= "" then
 					if vim.fn.filereadable(selection.value.path) == 1 then
 						vim.cmd('edit ' .. vim.fn.fnameescape(selection.value.path))
 					else
 						vim.notify("File not found: " .. selection.value.path, vim.log.levels.WARN)
 					end
+				else
+					vim.notify("No valid file selected", vim.log.levels.WARN)
 				end
 			end)
 			return true

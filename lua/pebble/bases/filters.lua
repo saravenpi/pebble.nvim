@@ -56,18 +56,23 @@ local function get_file_content(file_path)
 	
 	-- Check if cache is valid
 	if cached and (now - cached.timestamp) < CACHE_TTL then
-		local stat = vim.loop.fs_stat(file_path)
-		if stat and stat.mtime.sec == cached.mtime then
+		local ok, stat = pcall(vim.loop.fs_stat, file_path)
+		if ok and stat and stat.mtime.sec == cached.mtime then
 			return cached.content
 		end
 	end
 	
-	-- Read file content
-	local stat = vim.loop.fs_stat(file_path)
-	if not stat then return "" end
+	-- Read file content safely with performance limits
+	local ok, stat = pcall(vim.loop.fs_stat, file_path)
+	if not ok or not stat then return "" end
 	
-	local lines = vim.fn.readfile(file_path, "", 200) -- Reduced from 500 for speed
-	if not lines then return "" end
+	-- Skip very large files to prevent freezing
+	if stat.size > 100000 then -- 100KB limit
+		return "[Large file - content skipped for performance]"
+	end
+	
+	local ok_read, lines = pcall(vim.fn.readfile, file_path, "", 100) -- Further reduced for speed
+	if not ok_read or not lines then return "" end
 	
 	local content = table.concat(lines, "\n")
 	content_cache[file_path] = {
@@ -275,10 +280,22 @@ end
 
 function M.filter_files(files, filter)
 	if not filter then return files end
+	if not files or #files == 0 then return {} end
 	
 	local filtered = {}
+	local processed = 0
+	local MAX_PROCESS = 1000 -- Prevent processing too many files
+	
 	for _, file in ipairs(files) do
-		if M.evaluate_filter(filter, file.path, file.frontmatter) then
+		processed = processed + 1
+		if processed > MAX_PROCESS then
+			vim.notify("Filter processing limited to " .. MAX_PROCESS .. " files for performance", vim.log.levels.WARN)
+			break
+		end
+		
+		-- Safely evaluate filter
+		local ok, result = pcall(M.evaluate_filter, filter, file.path, file.frontmatter)
+		if ok and result then
 			table.insert(filtered, file)
 		end
 	end

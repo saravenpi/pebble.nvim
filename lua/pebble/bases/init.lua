@@ -52,23 +52,36 @@ function M.open_base(base_path)
 		return
 	end
 	
-	-- Get file data
+	-- Get file data with error handling
 	local root_dir = get_root_dir()
-	local files = cache.get_file_data(root_dir)
+	local ok, files = pcall(cache.get_file_data, root_dir)
 	
-	if not files or #files == 0 then
-		vim.notify("No markdown files found in " .. root_dir, vim.log.levels.WARN)
+	if not ok then
+		vim.notify("Error loading file data: " .. tostring(files), vim.log.levels.ERROR)
 		views.open_base_view(base_data, {})
 		return
 	end
 	
-	-- Apply base filters
+	files = files or {}
+	if #files == 0 then
+		vim.notify("No markdown files found in " .. root_dir .. ". Check if you have .md files in your directory.", vim.log.levels.INFO)
+		views.open_base_view(base_data, {})
+		return
+	end
+	
+	-- Apply base filters with timeout protection
 	if base_data.filters then
+		local start_time = vim.loop.now()
 		local ok, result = pcall(filters.filter_files, files, base_data.filters)
+		local duration = vim.loop.now() - start_time
+		
 		if ok and result then
 			files = result
+			if duration > 1000 then -- Log if filtering took more than 1 second
+				vim.notify("Base filtering took " .. duration .. "ms - consider optimizing filters", vim.log.levels.WARN)
+			end
 		else
-			vim.notify("Error applying filters", vim.log.levels.WARN)
+			vim.notify("Error applying base filters: " .. tostring(result), vim.log.levels.WARN)
 		end
 	end
 	
@@ -76,11 +89,19 @@ function M.open_base(base_path)
 	if base_data.views and #base_data.views > 0 then
 		local view = base_data.views[1]
 		
-		-- Apply view filters
+		-- Apply view filters with timeout protection
 		if view.filters then
+			local start_time = vim.loop.now()
 			local ok, result = pcall(filters.filter_files, files, view.filters)
+			local duration = vim.loop.now() - start_time
+			
 			if ok and result then
 				files = result
+				if duration > 1000 then
+					vim.notify("View filtering took " .. duration .. "ms - consider optimizing filters", vim.log.levels.WARN)
+				end
+			else
+				vim.notify("Error applying view filters: " .. tostring(result), vim.log.levels.WARN)
 			end
 		end
 		
@@ -114,11 +135,19 @@ function M.open_base(base_path)
 		end
 	end
 	
-	-- Apply formulas
+	-- Apply formulas with error handling
 	if base_data.formulas and vim.tbl_count(base_data.formulas) > 0 then
+		local start_time = vim.loop.now()
 		local ok, result = pcall(formulas.apply_formulas_to_files, files, base_data.formulas)
+		local duration = vim.loop.now() - start_time
+		
 		if ok and result then
 			files = result
+			if duration > 1000 then
+				vim.notify("Formula processing took " .. duration .. "ms", vim.log.levels.WARN)
+			end
+		else
+			vim.notify("Error applying formulas: " .. tostring(result), vim.log.levels.WARN)
 		end
 	end
 	
