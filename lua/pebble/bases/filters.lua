@@ -86,6 +86,10 @@ end
 local function has_tag(file_path, tag)
 	local content = get_file_content(file_path)
 	local escaped_tag = vim.pesc(tag)
+	local filename = vim.fn.fnamemodify(file_path, ":t")
+	
+	-- Debug: Log what we're checking
+	vim.notify("Checking " .. filename .. " for tag: " .. tag, vim.log.levels.INFO)
 	
 	-- Check for inline #tags in content (outside frontmatter)
 	local after_frontmatter = content
@@ -95,6 +99,7 @@ local function has_tag(file_path, tag)
 	end
 	
 	if after_frontmatter:match("#" .. escaped_tag .. "(%s|$|%p)") then
+		vim.notify("✅ Found inline tag #" .. tag .. " in " .. filename, vim.log.levels.INFO)
 		return true
 	end
 	
@@ -109,6 +114,7 @@ local function has_tag(file_path, tag)
 				for t in tags_content:gmatch("([^,]+)") do
 					t = t:match("^%s*(.-)%s*$"):gsub('^["\']', ''):gsub('["\']$', '')
 					if t == tag then
+						vim.notify("✅ Found frontmatter tag " .. tag .. " in " .. filename, vim.log.levels.INFO)
 						return true
 					end
 				end
@@ -118,12 +124,14 @@ local function has_tag(file_path, tag)
 		-- tags:\n  - tag format  
 		for line in frontmatter:gmatch("[^\n]+") do
 			if line:match("^%s*%-%s*" .. escaped_tag .. "%s*$") then
+				-- vim.notify("Found list tag " .. tag .. " in " .. filename, vim.log.levels.DEBUG)
 				return true
 			end
 		end
 		
 		-- tags: tag format
 		if frontmatter:match("tags:%s*" .. escaped_tag .. "(%s|$)") then
+			-- vim.notify("Found single tag " .. tag .. " in " .. filename, vim.log.levels.DEBUG)
 			return true
 		end
 	end
@@ -150,25 +158,27 @@ local function evaluate_condition(condition, file_path, frontmatter)
 			if not tag then
 				tag = condition:match("^file%.hasTag%('([^']+)'%)")
 			end
-			-- Handle multiple tags: file.hasTag("tag1", "tag2") -> check if has any of these tags
+			-- Handle multiple tags: file.hasTag("tag1", "tag2") -> check if has ALL of these tags (AND logic)
 			if not tag then
 				local tags_str = condition:match('^file%.hasTag%((.+)%)')
 				if tags_str then
-					-- Parse multiple quoted tags
-					local has_any = false
+					-- Parse multiple quoted tags and check ALL must be present
+					local tags_to_check = {}
 					for t in tags_str:gmatch('"([^"]+)"') do
-						if has_tag(file_path, t) then
-							has_any = true
-							break
-						end
+						table.insert(tags_to_check, t)
 					end
 					for t in tags_str:gmatch("'([^']+)'") do
-						if has_tag(file_path, t) then
-							has_any = true
-							break
+						table.insert(tags_to_check, t)
+					end
+					
+					-- All tags must be present
+					for _, t in ipairs(tags_to_check) do
+						if not has_tag(file_path, t) then
+							return false
 						end
 					end
-					return has_any
+					
+					return #tags_to_check > 0 -- Return true only if we had tags to check and all were found
 				end
 			end
 			-- Handle old taggedWith syntax

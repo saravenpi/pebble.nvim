@@ -1,0 +1,17 @@
+views:
+  - type: table
+    name: Food Items
+    filters:
+      and:
+        - file.hasTag("food")
+    order:
+      - file.name
+      - tags
+      - file.path
+  - type: table  
+    name: Code Projects
+    filters:
+      and:
+        - file.hasTag("code", "projet")
+    order:
+      - file.name

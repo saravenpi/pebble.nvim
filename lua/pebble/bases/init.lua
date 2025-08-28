@@ -43,11 +43,16 @@ function M.open_base(base_path)
 		return
 	end
 	
+	-- Debug: show initial file count
+	vim.notify("Found " .. #files .. " files in " .. root_dir, vim.log.levels.INFO)
+	
 	-- Apply filters safely
 	if base_data.filters then
+		vim.notify("Applying global filters: " .. vim.inspect(base_data.filters), vim.log.levels.INFO)
 		local ok, result = pcall(filters.filter_files, files, base_data.filters)
 		if ok then
 			files = result
+			vim.notify("After global filters: " .. #files .. " files remain", vim.log.levels.INFO)
 		else
 			vim.notify("Error applying filters: " .. result, vim.log.levels.ERROR)
 		end
@@ -58,9 +63,11 @@ function M.open_base(base_path)
 		local view = base_data.views[1]
 		
 		if view.filters then
+			vim.notify("Applying view filters: " .. vim.inspect(view.filters), vim.log.levels.INFO)
 			local ok, result = pcall(filters.filter_files, files, view.filters)
 			if ok then
 				files = result
+				vim.notify("After view filters: " .. #files .. " files remain", vim.log.levels.INFO)
 			else
 				vim.notify("Error applying view filters: " .. result, vim.log.levels.ERROR)
 			end

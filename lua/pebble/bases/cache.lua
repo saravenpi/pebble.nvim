@@ -7,13 +7,40 @@ local CACHE_TTL = 5000
 
 local function get_markdown_files(root_dir)
 	local files = {}
-	local cmd = string.format("find '%s' -type f \\( -name '*.md' -o -name '*.markdown' \\) 2>/dev/null | head -200", root_dir)
+	-- Use find with recursive search, excluding common ignore directories
+	local cmd = string.format([[find '%s' -type f \( -name '*.md' -o -name '*.markdown' \) ! -path '*/\.git/*' ! -path '*/node_modules/*' ! -path '*/\.obsidian/*' ! -path '*/build/*' ! -path '*/dist/*' 2>/dev/null]], root_dir)
 	local result = vim.fn.system(cmd)
 	
-	if vim.v.shell_error == 0 then
+	if vim.v.shell_error == 0 and result ~= "" then
 		for path in result:gmatch("[^\n]+") do
-			table.insert(files, path)
+			if path ~= "" and vim.fn.filereadable(path) == 1 then
+				table.insert(files, path)
+			end
 		end
+	end
+	
+	-- Debug: log how many files we found
+	vim.notify("Found " .. #files .. " markdown files recursively in " .. root_dir, vim.log.levels.INFO)
+	
+	-- If no files found with find, try Lua-based recursive search as fallback
+	if #files == 0 then
+		local function scan_dir(dir)
+			local items = vim.fn.readdir(dir)
+			for _, item in ipairs(items) do
+				local full_path = dir .. "/" .. item
+				local stat = vim.loop.fs_stat(full_path)
+				if stat then
+					if stat.type == "directory" and not item:match("^%.") and item ~= "node_modules" and item ~= ".git" and item ~= ".obsidian" then
+						scan_dir(full_path)
+					elseif stat.type == "file" and (item:match("%.md$") or item:match("%.markdown$")) then
+						table.insert(files, full_path)
+					end
+				end
+			end
+		end
+		
+		scan_dir(root_dir)
+		vim.notify("Fallback Lua scan found " .. #files .. " files", vim.log.levels.INFO)
 	end
 	
 	return files
