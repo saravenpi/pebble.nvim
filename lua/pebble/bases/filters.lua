@@ -89,6 +89,7 @@ local function has_tag(file_path, tag)
 	local filename = vim.fn.fnamemodify(file_path, ":t")
 	
 	
+	
 	-- Check for inline #tags in content (outside frontmatter)
 	local after_frontmatter = content
 	local frontmatter_match = content:match("^%-%-%-.-\n%-%-%-\n(.*)$")
@@ -96,7 +97,10 @@ local function has_tag(file_path, tag)
 		after_frontmatter = frontmatter_match
 	end
 	
-	if after_frontmatter:match("#" .. escaped_tag .. "(%s|$|%p)") then
+	-- Check for #tag followed by whitespace, punctuation, or end of string
+	if after_frontmatter:match("#" .. escaped_tag .. "(%s)") or 
+	   after_frontmatter:match("#" .. escaped_tag .. "(%p)") or
+	   after_frontmatter:match("#" .. escaped_tag .. "$") then
 		return true
 	end
 	
@@ -150,13 +154,13 @@ local function evaluate_condition(condition, file_path, frontmatter)
 		-- Support both old and new Obsidian syntax
 		if condition:match("^file%.hasTag%(") or condition:match("^taggedWith%(") then
 			-- Handle single tag: file.hasTag("tag")
-			local tag = condition:match('^file%.hasTag%("([^"]+)"%)')
+			local tag = condition:match('^file%.hasTag("([^"]+)")')
 			if not tag then
 				tag = condition:match("^file%.hasTag%('([^']+)'%)")
 			end
 			-- Handle multiple tags: file.hasTag("tag1", "tag2") -> check if has ALL of these tags (AND logic)
 			if not tag then
-				local tags_str = condition:match('^file%.hasTag%((.+)%)')
+				local tags_str = condition:match('^file%.hasTag(.+)%)')
 				if tags_str then
 					-- Parse multiple quoted tags and check ALL must be present
 					local tags_to_check = {}
@@ -179,25 +183,25 @@ local function evaluate_condition(condition, file_path, frontmatter)
 			end
 			-- Handle old taggedWith syntax
 			if not tag then
-				tag = condition:match('^taggedWith%([^,]+,%s*"([^"]+)"%)')
+				tag = condition:match('^taggedWith%([^,]+,%s*"([^"]+)")')
 			end
 			return tag and has_tag(file_path, tag)
 		elseif condition:match("^file%.hasLink%(") or condition:match("^linksTo%(") then
-			local link = condition:match('^file%.hasLink%("([^"]+)"%)')
+			local link = condition:match('^file%.hasLink%("([^"]+)")')
 			if not link then
 				link = condition:match("^file%.hasLink%('([^']+)'%)")
 			end
 			if not link then
-				link = condition:match('^linksTo%([^,]+,%s*"([^"]+)"%)')
+				link = condition:match('^linksTo%([^,]+,%s*"([^"]+)")')
 			end
 			return link and has_link(file_path, link)
 		elseif condition:match("^file%.inFolder%(") or condition:match("^inFolder%(") then
-			local folder = condition:match('^file%.inFolder%("([^"]+)"%)')
+			local folder = condition:match('^file%.inFolder%("([^"]+)")')
 			if not folder then
 				folder = condition:match("^file%.inFolder%('([^']+)'%)")
 			end
 			if not folder then
-				folder = condition:match('^inFolder%([^,]+,%s*"([^"]+)"%)')
+				folder = condition:match('^inFolder%([^,]+,%s*"([^"]+)")')
 			end
 			return folder and in_folder(file_path, folder)
 		else
