@@ -903,91 +903,39 @@ local function find_links_in_file(file_path)
 	return links
 end
 
---- Build a comprehensive graph with depth 3 connections between markdown files
-local function build_comprehensive_graph(current_name, max_depth)
-	max_depth = max_depth or 3
-	local graph = {}
-	local processed = {}
-	local to_process = { { name = current_name, level = 0 } }
+-- Removed complex build_comprehensive_graph - was causing performance issues
 
-	if not cache_valid then
-		build_file_cache()
-	end
-
-	-- Initialize current file
+--- Build a simple, fast graph showing only direct connections
+local function build_simple_graph(current_name)
 	local current_file = vim.api.nvim_buf_get_name(0)
+	local graph = {}
+	
+	-- Initialize current file node
 	graph[current_name] = {
 		file_path = current_file,
 		outgoing = {},
 		incoming = {},
-		level = 0,
 	}
-
-	-- Performance: Process nodes in batches to avoid blocking
-	local batch_count = 0
-	local BATCH_SIZE = 20
 	
-	while #to_process > 0 do
-		local current = table.remove(to_process, 1)
-		local name, level = current.name, current.level
-
-		if processed[name] or level > max_depth then
-			goto continue
-		end
-
-		processed[name] = true
-		batch_count = batch_count + 1
-		
-		-- Yield control periodically
-		if batch_count % BATCH_SIZE == 0 then
-			vim.schedule(function() end)  -- Yield to UI
-		end
-
-		-- Get file path for this node
-		local file_path = name == current_name and current_file or find_markdown_file(name)
-		if not file_path then
-			goto continue
-		end
-
-		-- Initialize node if not exists
-		if not graph[name] then
-			graph[name] = {
-				file_path = file_path,
-				outgoing = {},
-				incoming = {},
-				level = level,
-			}
-		end
-
-		-- Find all outgoing links from this file
-		local links = find_links_in_file(file_path)
-		for _, link in ipairs(links) do
-			if link ~= name then -- Avoid self-references
-				-- Initialize target node
-				if not graph[link] then
-					local target_file = find_markdown_file(link)
-					graph[link] = {
-						file_path = target_file,
-						outgoing = {},
-						incoming = {},
-						level = level + 1,
-					}
-				end
-
-				-- Create bidirectional relationship
-				graph[name].outgoing[link] = true
-				graph[link].incoming[name] = true
-
-				-- Add to processing queue if not too deep
-				if level < max_depth and not processed[link] then
-					table.insert(to_process, { name = link, level = level + 1 })
-				end
+	-- Get links from current file only (fast, no recursion)
+	local links = find_links_in_file(current_file)
+	for _, link_name in ipairs(links) do
+		if link_name ~= "" and link_name ~= current_name then
+			graph[current_name].outgoing[link_name] = true
+			
+			-- Initialize target node
+			if not graph[link_name] then
+				local target_path = find_markdown_file(link_name)
+				graph[link_name] = {
+					file_path = target_path,
+					outgoing = {},
+					incoming = {},
+				}
 			end
+			graph[link_name].incoming[current_name] = true
 		end
-
-		::continue::
 	end
-
+	
 	return graph
 end
 
@@ -1004,7 +952,8 @@ local function build_link_graph()
 		return cached_graph.graph, current_name
 	end
 
-	local graph = build_comprehensive_graph(current_name, 3)
+	-- Use simple graph instead of comprehensive (performance)
+	local graph = build_simple_graph(current_name)
 
 	graph_cache[cache_key] = {
 		graph = graph,
