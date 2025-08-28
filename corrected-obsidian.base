@@ -1,0 +1,13 @@
+views:
+  - type: table
+    name: Code Projects
+    filters:
+      and:
+        - file.hasTag("code")
+        - file.hasTag("projet")
+  - type: cards
+    name: Project Cards
+    filters:
+      or:
+        - file.hasTag("code")
+        - file.hasTag("projet")

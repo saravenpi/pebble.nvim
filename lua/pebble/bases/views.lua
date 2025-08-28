@@ -323,7 +323,9 @@ function M.open_base_view(base_data, files)
 	vim.api.nvim_buf_set_keymap(base_view_buf, 'n', 'r', '', {
 		callback = function()
 			local cache = require("pebble.bases.cache")
+			local filters = require("pebble.bases.filters")
 			cache.clear_cache()
+			filters.clear_content_cache()
 			vim.notify("Base cache refreshed", vim.log.levels.INFO)
 			vim.api.nvim_win_close(base_view_win, true)
 		end,
