@@ -130,10 +130,10 @@ function source:complete(request, callback)
 		
 		-- Check for tag context first  
 		local is_tag, tag_query = utils.is_tag_context()
+		vim.notify("Debug: is_tag=" .. tostring(is_tag) .. ", tag_query='" .. (tag_query or "nil") .. "'")
 		if is_tag then
 			local root_dir = utils.get_root_dir()
 			items = utils.get_tag_completions(tag_query, root_dir)
-			-- Debug: uncomment to see tag context detection  
 			vim.notify("Tag context detected: '" .. (tag_query or "") .. "', found " .. #items .. " items")
 		else
 			-- Check for wiki link context

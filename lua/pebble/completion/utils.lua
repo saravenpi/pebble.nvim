@@ -96,7 +96,7 @@ function M.get_root_dir()
     return search.get_root_dir()
 end
 
--- Get wiki completions using ripgrep
+-- Get wiki completions using ripgrep with recursive search and aliases
 function M.get_wiki_completions(query, root_dir)
     local cache_key = "wiki_" .. (root_dir or "") .. "_" .. (query or "")
     
@@ -106,11 +106,32 @@ function M.get_wiki_completions(query, root_dir)
         return cached.data
     end
     
-    -- Find markdown files using the search module
-    local markdown_files = search.find_markdown_files_sync(root_dir)
-    local completions = {}
+    -- Find ALL markdown files recursively using ripgrep
+    local markdown_files = {}
     
-    if not markdown_files or #markdown_files == 0 then
+    -- Use ripgrep for recursive file discovery  
+    if search.has_ripgrep() then
+        -- Use ripgrep to find ALL .md files recursively
+        local cmd = string.format(
+            'rg --files --type md --hidden --follow %s 2>/dev/null || true',
+            vim.fn.shellescape(root_dir or vim.fn.getcwd())
+        )
+        local output = vim.fn.system(cmd)
+        if vim.v.shell_error == 0 and output and output ~= "" then
+            for file_path in output:gmatch("[^\n]+") do
+                if file_path and file_path ~= "" then
+                    table.insert(markdown_files, file_path)
+                end
+            end
+        end
+    end
+    
+    -- Fallback to search module if ripgrep didn't work
+    if #markdown_files == 0 then
+        markdown_files = search.find_markdown_files_sync(root_dir) or {}
+    end
+    
+    if #markdown_files == 0 then
         return {
             {
                 label = "No markdown files found",
@@ -121,75 +142,131 @@ function M.get_wiki_completions(query, root_dir)
         }
     end
     
-    -- Process each file to create completion items
+    -- Process each file to create completion items with aliases
     for _, file_path in ipairs(markdown_files) do
         local filename = vim.fn.fnamemodify(file_path, ":t:r") -- Get filename without extension
         local relative_path = vim.fn.fnamemodify(file_path, ":~:.")
+        local dir_name = vim.fn.fnamemodify(file_path, ":h:t") -- Parent directory name
         
-        -- Improved filtering logic
-        local should_include = false
-        local relevance_score = 0
+        -- Create multiple completion entries for different alias formats
+        local aliases = {
+            {
+                label = filename,
+                insertText = filename,
+                detail = relative_path,
+                alias_type = "filename"
+            }
+        }
         
-        if not query or query == "" then
-            -- No query, include all files
-            should_include = true
-            relevance_score = 1000 - #filename -- Prefer shorter names
-        else
-            local query_lower = query:lower()
-            local filename_lower = filename:lower()
-            local relative_lower = relative_path:lower()
-            
-            -- Check for exact matches (highest priority)
-            if filename_lower == query_lower then
+        -- Add directory/filename format if file is in subdirectory
+        if dir_name and dir_name ~= "." and dir_name ~= filename then
+            table.insert(aliases, {
+                label = dir_name .. "/" .. filename,
+                insertText = filename, -- Still insert just the filename for wiki links
+                detail = relative_path,
+                alias_type = "dir/file"
+            })
+        end
+        
+        -- Add path-based alias for deep nested files
+        local path_parts = {}
+        for part in relative_path:gmatch("[^/]+") do
+            if part ~= filename .. ".md" then -- Don't include the filename.md part
+                table.insert(path_parts, part)
+            end
+        end
+        if #path_parts > 1 then
+            local path_alias = table.concat(path_parts, "/") .. "/" .. filename
+            table.insert(aliases, {
+                label = path_alias,
+                insertText = filename,
+                detail = relative_path,
+                alias_type = "full_path"
+            })
+        end
+        
+        -- Process each alias
+        for _, alias in ipairs(aliases) do
+            local should_include = false
+            local relevance_score = 0
+        
+            if not query or query == "" then
+                -- No query, include all files
                 should_include = true
-                relevance_score = 10000
-            -- Check for starts with (high priority)  
-            elseif filename_lower:sub(1, #query_lower) == query_lower then
-                should_include = true
-                relevance_score = 5000 + (1000 - #filename)
-            -- Check for contains in filename (medium priority)
-            elseif filename_lower:find(query_lower, 1, true) then
-                should_include = true
-                relevance_score = 3000 + (1000 - #filename)
-            -- Check for contains in relative path (lower priority)
-            elseif relative_lower:find(query_lower, 1, true) then
-                should_include = true
-                relevance_score = 1000 + (1000 - #relative_path)
-            -- Check for fuzzy matching (word boundaries)
+                relevance_score = 1000 - #alias.label -- Prefer shorter aliases
             else
-                -- Split query into words and check if all words are found
-                local query_words = {}
-                for word in query_lower:gmatch("%w+") do
-                    table.insert(query_words, word)
-                end
+                local query_lower = query:lower()
+                local label_lower = alias.label:lower()
+                local filename_lower = filename:lower()
+                local relative_lower = relative_path:lower()
                 
-                if #query_words > 0 then
-                    local all_words_found = true
-                    for _, word in ipairs(query_words) do
-                        if not filename_lower:find(word, 1, true) and not relative_lower:find(word, 1, true) then
-                            all_words_found = false
-                            break
-                        end
+                -- Bonus score based on alias type (filename preferred)
+                local type_bonus = 0
+                if alias.alias_type == "filename" then type_bonus = 1000
+                elseif alias.alias_type == "dir/file" then type_bonus = 500
+                else type_bonus = 100 end
+                
+                -- Check for exact matches (highest priority)
+                if label_lower == query_lower or filename_lower == query_lower then
+                    should_include = true
+                    relevance_score = 10000 + type_bonus
+                -- Check for starts with (high priority)  
+                elseif label_lower:sub(1, #query_lower) == query_lower or filename_lower:sub(1, #query_lower) == query_lower then
+                    should_include = true
+                    relevance_score = 5000 + type_bonus + (1000 - #alias.label)
+                -- Check for contains in label or filename (medium priority)
+                elseif label_lower:find(query_lower, 1, true) or filename_lower:find(query_lower, 1, true) then
+                    should_include = true
+                    relevance_score = 3000 + type_bonus + (1000 - #alias.label)
+                -- Check for contains in full relative path (lower priority)
+                elseif relative_lower:find(query_lower, 1, true) then
+                    should_include = true
+                    relevance_score = 1500 + type_bonus + (1000 - #relative_path)
+                -- Check for fuzzy matching (word boundaries)
+                else
+                    -- Split query into words and check if all words are found
+                    local query_words = {}
+                    for word in query_lower:gmatch("%w+") do
+                        table.insert(query_words, word)
                     end
                     
-                    if all_words_found then
-                        should_include = true
-                        relevance_score = 500 + (1000 - #filename)
+                    if #query_words > 0 then
+                        local all_words_found = true
+                        local search_targets = { label_lower, filename_lower, relative_lower }
+                        
+                        for _, word in ipairs(query_words) do
+                            local word_found = false
+                            for _, target in ipairs(search_targets) do
+                                if target:find(word, 1, true) then
+                                    word_found = true
+                                    break
+                                end
+                            end
+                            if not word_found then
+                                all_words_found = false
+                                break
+                            end
+                        end
+                        
+                        if all_words_found then
+                            should_include = true
+                            relevance_score = 500 + type_bonus + (1000 - #alias.label)
+                        end
                     end
                 end
             end
-        end
-        
-        if should_include then
-            table.insert(completions, {
-                label = filename,
-                kind = vim.lsp.protocol.CompletionItemKind.File,
-                detail = relative_path,
-                insertText = filename,
-                documentation = "Wiki link to " .. relative_path,
-                sortText = string.format("%05d_%s", 99999 - relevance_score, filename),
-                _relevance = relevance_score -- For debugging
-            })
+            
+            if should_include then
+                table.insert(completions, {
+                    label = alias.label,
+                    kind = vim.lsp.protocol.CompletionItemKind.File,
+                    detail = alias.detail,
+                    insertText = alias.insertText,
+                    documentation = "Wiki link to " .. alias.detail .. " (" .. alias.alias_type .. ")",
+                    sortText = string.format("%05d_%s", 99999 - relevance_score, alias.label),
+                    _relevance = relevance_score -- For debugging
+                })
+            end
         end
     end
     
@@ -322,35 +399,54 @@ function M.get_tag_completions(query, root_dir)
         return cached.data
     end
     
-    -- Try to use synchronous tag extraction first, with fallback
+    -- Use simple ripgrep-based tag extraction for completion responsiveness  
     local tags = {}
     
-    -- First try the async function with a very short timeout for completion responsiveness
-    local completed = false
-    local extraction_error = nil
-    
-    search.extract_tags_async(root_dir, function(extracted_tags, error)
-        tags = extracted_tags or {}
-        extraction_error = error
-        completed = true
-    end)
-    
-    -- Wait for completion with short timeout to keep completion snappy
-    local timeout = 1000 -- 1 second max for completion responsiveness
-    local start_time = vim.loop.now()
-    while not completed and (vim.loop.now() - start_time) < timeout do
-        vim.wait(5) -- Wait 5ms between checks for responsiveness
+    -- Try direct ripgrep command for faster tag extraction
+    if search.has_ripgrep() then
+        local cmd = string.format(
+            'rg "#([a-zA-Z0-9_-]+)" --only-matching --no-filename --no-line-number %s 2>/dev/null | sort | uniq -c | sort -nr | head -50 || true',
+            vim.fn.shellescape(root_dir or vim.fn.getcwd())
+        )
+        local output = vim.fn.system(cmd)
+        if vim.v.shell_error == 0 and output and output ~= "" then
+            for line in output:gmatch("[^\n]+") do
+                local count, tag = line:match("^%s*(%d+)%s+#(.+)$")
+                if count and tag then
+                    tags[tag] = tonumber(count) or 1
+                end
+            end
+        end
     end
     
-    -- If extraction didn't complete or failed, provide sensible fallbacks
-    if not completed or extraction_error or not tags or vim.tbl_isempty(tags) then
-        -- Provide some common tag suggestions as fallback
+    -- If direct ripgrep didn't work, try the search module async function with very short timeout
+    if vim.tbl_isempty(tags) then
+        local completed = false
+        search.extract_tags_async(root_dir, function(extracted_tags, error)
+            if not error and extracted_tags then
+                tags = extracted_tags
+            end
+            completed = true
+        end)
+        
+        -- Very short wait for async function
+        local timeout = 200 -- 200ms max
+        local start_time = vim.loop.now()
+        while not completed and (vim.loop.now() - start_time) < timeout do
+            vim.wait(10, function() return completed end)
+        end
+    end
+    
+    -- If still no tags, provide sensible fallbacks  
+    if vim.tbl_isempty(tags) then
         tags = {
             ["todo"] = 1,
             ["project"] = 1,
-            ["note"] = 1,
+            ["note"] = 1,  
             ["idea"] = 1,
-            ["important"] = 1
+            ["important"] = 1,
+            ["work"] = 1,
+            ["personal"] = 1
         }
     end
     
