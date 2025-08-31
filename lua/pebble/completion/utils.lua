@@ -126,33 +126,93 @@ function M.get_wiki_completions(query, root_dir)
         local filename = vim.fn.fnamemodify(file_path, ":t:r") -- Get filename without extension
         local relative_path = vim.fn.fnamemodify(file_path, ":~:.")
         
-        -- Filter based on query if provided
-        if not query or query == "" or filename:lower():match(query:lower()) then
+        -- Improved filtering logic
+        local should_include = false
+        local relevance_score = 0
+        
+        if not query or query == "" then
+            -- No query, include all files
+            should_include = true
+            relevance_score = 1000 - #filename -- Prefer shorter names
+        else
+            local query_lower = query:lower()
+            local filename_lower = filename:lower()
+            local relative_lower = relative_path:lower()
+            
+            -- Check for exact matches (highest priority)
+            if filename_lower == query_lower then
+                should_include = true
+                relevance_score = 10000
+            -- Check for starts with (high priority)  
+            elseif filename_lower:sub(1, #query_lower) == query_lower then
+                should_include = true
+                relevance_score = 5000 + (1000 - #filename)
+            -- Check for contains in filename (medium priority)
+            elseif filename_lower:find(query_lower, 1, true) then
+                should_include = true
+                relevance_score = 3000 + (1000 - #filename)
+            -- Check for contains in relative path (lower priority)
+            elseif relative_lower:find(query_lower, 1, true) then
+                should_include = true
+                relevance_score = 1000 + (1000 - #relative_path)
+            -- Check for fuzzy matching (word boundaries)
+            else
+                -- Split query into words and check if all words are found
+                local query_words = {}
+                for word in query_lower:gmatch("%w+") do
+                    table.insert(query_words, word)
+                end
+                
+                if #query_words > 0 then
+                    local all_words_found = true
+                    for _, word in ipairs(query_words) do
+                        if not filename_lower:find(word, 1, true) and not relative_lower:find(word, 1, true) then
+                            all_words_found = false
+                            break
+                        end
+                    end
+                    
+                    if all_words_found then
+                        should_include = true
+                        relevance_score = 500 + (1000 - #filename)
+                    end
+                end
+            end
+        end
+        
+        if should_include then
             table.insert(completions, {
                 label = filename,
                 kind = vim.lsp.protocol.CompletionItemKind.File,
                 detail = relative_path,
                 insertText = filename,
                 documentation = "Wiki link to " .. relative_path,
-                sortText = string.format("%04d_%s", #filename, filename) -- Sort by length then name
+                sortText = string.format("%05d_%s", 99999 - relevance_score, filename),
+                _relevance = relevance_score -- For debugging
             })
         end
     end
     
-    -- Sort completions by relevance (shorter names first, then alphabetical)
+    -- Sort completions by relevance score (highest first)
     table.sort(completions, function(a, b)
-        local a_len = #a.label
-        local b_len = #b.label
-        if a_len == b_len then
+        local a_rel = a._relevance or 0
+        local b_rel = b._relevance or 0
+        if a_rel == b_rel then
             return a.label < b.label
         end
-        return a_len < b_len
+        return a_rel > b_rel
     end)
     
-    -- Limit results to prevent UI lag
-    if #completions > 50 then
+    -- Limit results to prevent UI lag, but be more generous with filtered results
+    local max_results = 100
+    if query and query ~= "" then
+        -- For filtered results, be even more generous
+        max_results = 150
+    end
+    
+    if #completions > max_results then
         local limited = {}
-        for i = 1, 50 do
+        for i = 1, max_results do
             table.insert(limited, completions[i])
         end
         completions = limited
