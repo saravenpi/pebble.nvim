@@ -172,24 +172,20 @@ function M.detect_environment()
     
     -- Check repository size to suggest performance preset
     else
-        local root_dir = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-        if vim.v.shell_error == 0 and root_dir ~= "" then
-            local md_count = vim.fn.system("find '" .. root_dir .. "' -name '*.md' | wc -l"):gsub("\n", "")
-            local count = tonumber(md_count) or 0
+        local search = require("pebble.bases.search")
+        local root_dir = search.get_root_dir()
+        local md_files = search.find_markdown_files_sync(root_dir)
+        local count = #md_files
             
-            if count > 2000 then
-                suggestions.preset = "performance"
-                suggestions.reason = "Large repository detected (" .. count .. " markdown files)"
-            elseif count > 500 then
-                suggestions.preset = "balanced"
-                suggestions.reason = "Medium repository detected (" .. count .. " markdown files)"
-            else
-                suggestions.preset = "comprehensive"
-                suggestions.reason = "Small repository detected (" .. count .. " markdown files)"
-            end
-        else
+        if count > 2000 then
+            suggestions.preset = "performance"
+            suggestions.reason = "Large repository detected (" .. count .. " markdown files)"
+        elseif count > 500 then
             suggestions.preset = "balanced"
-            suggestions.reason = "Default balanced configuration"
+            suggestions.reason = "Medium repository detected (" .. count .. " markdown files)"
+        else
+            suggestions.preset = "comprehensive"
+            suggestions.reason = "Small repository detected (" .. count .. " markdown files)"
         end
     end
     

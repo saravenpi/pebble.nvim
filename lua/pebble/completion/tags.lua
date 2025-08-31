@@ -3,14 +3,16 @@ local M = {}
 -- Performance configurations
 local TAG_CACHE_TTL = 60000  -- 1 minute TTL
 local MAX_TAG_RESULTS = 100
-local RIPGREP_TIMEOUT = 2000 -- 2 second timeout for ripgrep
+local RIPGREP_TIMEOUT = 3000 -- 3 second timeout for ripgrep
+local MAX_FILES_SCAN = 2000  -- Limit for fallback method
 
 -- Cache structure
 local tag_cache = {
     entries = {},
     frequency = {},
     last_update = 0,
-    root_dir = nil
+    root_dir = nil,
+    is_updating = false
 }
 
 -- Default configuration
@@ -18,12 +20,12 @@ local default_config = {
     -- Trigger patterns
     trigger_pattern = "#",
     
-    -- Tag extraction patterns for ripgrep
-    inline_tag_pattern = "#([a-zA-Z0-9_/-]+)",
-    frontmatter_tag_pattern = "tags:\\s*\\[([^\\]]+)\\]|tags:\\s*-\\s*([^\\n]+)",
+    -- Tag extraction patterns for ripgrep (improved)
+    inline_tag_pattern = "#([a-zA-Z0-9_][a-zA-Z0-9_/-]*)",
+    frontmatter_tag_pattern = "^\\s*tags:\\s*(.+)$",
     
     -- File patterns to search
-    file_patterns = { "*.md", "*.markdown", "*.txt" },
+    file_patterns = { "*.md", "*.markdown", "*.txt", "*.mdx" },
     
     -- Scoring weights
     frequency_weight = 0.7,
@@ -37,7 +39,12 @@ local default_config = {
     -- Performance options
     async_extraction = true,
     cache_ttl = 60000,
-    max_files_scan = 1000,
+    max_files_scan = 2000,
+    
+    -- Advanced options
+    case_sensitive = false,
+    min_tag_length = 1,
+    exclude_patterns = { "node_modules", ".git", ".obsidian" }
 }
 
 local config = {}
@@ -48,167 +55,318 @@ local function get_root_dir()
         return tag_cache.root_dir
     end
     
-    local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-    if vim.v.shell_error == 0 and git_root ~= "" then
-        tag_cache.root_dir = git_root
-    else
-        tag_cache.root_dir = vim.fn.getcwd()
-    end
-    
+    local search = require("pebble.bases.search")
+    tag_cache.root_dir = search.get_root_dir()
     return tag_cache.root_dir
 end
 
 local function is_cache_valid()
     local now = vim.loop.now()
-    return (now - tag_cache.last_update) < config.cache_ttl
+    return (now - tag_cache.last_update) < config.cache_ttl and not tag_cache.is_updating
 end
 
 local function normalize_tag(tag)
-    -- Remove quotes and extra whitespace
-    tag = tag:gsub('^["\']', ''):gsub('["\']$', ''):gsub("^%s+", ""):gsub("%s+$", "")
+    if not tag or tag == "" then
+        return nil
+    end
+    
+    -- Remove quotes, extra whitespace, and hash prefix if present
+    tag = tag:gsub('^[#"\']', ''):gsub('["\']$', ''):gsub("^%s+", ""):gsub("%s+$", "")
     
     -- Handle nested tags - normalize separators
     tag = tag:gsub("%s*/%s*", "/"):gsub("%s*\\%s*", "/")
     
+    -- Remove trailing separators
+    tag = tag:gsub("/$", "")
+    
+    -- Validate minimum length
+    if #tag < config.min_tag_length then
+        return nil
+    end
+    
     return tag
 end
 
--- Ripgrep-based tag extraction
+-- Check if ripgrep is available using centralized utility
+local function has_ripgrep()
+    local search = require("pebble.bases.search")
+    return search.has_ripgrep()
+end
+
+-- Build exclude patterns for ripgrep
+local function build_exclude_patterns()
+    local exclude_args = {}
+    for _, pattern in ipairs(config.exclude_patterns) do
+        table.insert(exclude_args, "--glob")
+        table.insert(exclude_args, "!" .. pattern)
+    end
+    return exclude_args
+end
+
+-- Improved ripgrep-based tag extraction
 local function extract_tags_with_ripgrep(root_dir, callback)
     local tags = {}
     local frequency = {}
+    local completed_jobs = 0
+    local total_jobs = 2
     
-    -- Build ripgrep command for inline tags
-    local inline_cmd = string.format(
-        "rg --no-filename --no-line-number --only-matching '%s' %s 2>/dev/null",
-        config.inline_tag_pattern,
-        table.concat(vim.tbl_map(function(pattern) return "'" .. root_dir .. "/" .. pattern .. "'" end, config.file_patterns), " ")
-    )
+    local function job_completed()
+        completed_jobs = completed_jobs + 1
+        if completed_jobs >= total_jobs then
+            callback(tags, frequency)
+        end
+    end
     
-    -- Build ripgrep command for frontmatter tags
-    local frontmatter_cmd = string.format(
-        "rg --no-filename --only-matching '%s' %s 2>/dev/null",
-        config.frontmatter_tag_pattern,
-        table.concat(vim.tbl_map(function(pattern) return "'" .. root_dir .. "/" .. pattern .. "'" end, config.file_patterns), " ")
-    )
+    -- Build file pattern arguments
+    local file_pattern_args = {}
+    for _, pattern in ipairs(config.file_patterns) do
+        table.insert(file_pattern_args, "--glob")
+        table.insert(file_pattern_args, pattern)
+    end
     
-    local function process_inline_tags()
-        vim.fn.jobstart(inline_cmd, {
-            stdout_buffered = true,
-            on_stdout = function(_, data)
-                for _, line in ipairs(data) do
-                    if line and line ~= "" then
-                        -- Extract tag from match (remove the # prefix)
-                        local tag = line:match("#([a-zA-Z0-9_/-]+)")
-                        if tag then
-                            tag = normalize_tag(tag)
-                            if tag ~= "" then
+    -- Build exclude pattern arguments
+    local exclude_args = build_exclude_patterns()
+    
+    -- Extract inline tags
+    local inline_cmd = {
+        "rg",
+        "--no-filename",
+        "--no-line-number", 
+        "--only-matching",
+        "--no-heading",
+        config.inline_tag_pattern
+    }
+    
+    -- Add file patterns and exclude patterns
+    vim.list_extend(inline_cmd, file_pattern_args)
+    vim.list_extend(inline_cmd, exclude_args)
+    table.insert(inline_cmd, root_dir)
+    
+    vim.fn.jobstart(inline_cmd, {
+        stdout_buffered = true,
+        stderr_buffered = true,
+        timeout = RIPGREP_TIMEOUT,
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    local tag = normalize_tag(line)
+                    if tag then
+                        tags[tag] = true
+                        frequency[tag] = (frequency[tag] or 0) + 1
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            -- Log errors but don't fail completely
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    vim.notify("Tag extraction warning: " .. line, vim.log.levels.DEBUG)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code ~= 0 then
+                vim.notify("Inline tag extraction failed with code: " .. code, vim.log.levels.DEBUG)
+            end
+            job_completed()
+        end
+    })
+    
+    -- Extract frontmatter tags
+    local frontmatter_cmd = {
+        "rg",
+        "--no-filename",
+        "--only-matching",
+        "--no-heading",
+        "-A", "10",  -- Read up to 10 lines after tags: line
+        config.frontmatter_tag_pattern
+    }
+    
+    -- Add file patterns and exclude patterns
+    vim.list_extend(frontmatter_cmd, file_pattern_args)
+    vim.list_extend(frontmatter_cmd, exclude_args)
+    table.insert(frontmatter_cmd, root_dir)
+    
+    vim.fn.jobstart(frontmatter_cmd, {
+        stdout_buffered = true,
+        stderr_buffered = true,
+        timeout = RIPGREP_TIMEOUT,
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    -- Extract the tag content after "tags:"
+                    local tag_content = line:match("^%s*tags:%s*(.+)$")
+                    if tag_content then
+                        -- Handle different YAML formats
+                        -- Array format: [tag1, tag2, tag3]
+                        local array_match = tag_content:match("^%[(.+)%]$")
+                        if array_match then
+                            for tag in array_match:gmatch("([^,]+)") do
+                                tag = normalize_tag(tag)
+                                if tag then
+                                    tags[tag] = true
+                                    frequency[tag] = (frequency[tag] or 0) + 1
+                                end
+                            end
+                        else
+                            -- Single tag or string format
+                            local tag = normalize_tag(tag_content)
+                            if tag then
+                                tags[tag] = true
+                                frequency[tag] = (frequency[tag] or 0) + 1
+                            end
+                        end
+                    else
+                        -- Handle list format continuation: "  - tag"
+                        local list_tag = line:match("^%s*-%s*(.+)$")
+                        if list_tag then
+                            local tag = normalize_tag(list_tag)
+                            if tag then
                                 tags[tag] = true
                                 frequency[tag] = (frequency[tag] or 0) + 1
                             end
                         end
                     end
                 end
-            end,
-            on_exit = function(_, code)
-                if code == 0 then
-                    process_frontmatter_tags()
-                else
-                    -- Fallback to simple grep if ripgrep fails
-                    callback(tags, frequency)
+            end
+        end,
+        on_stderr = function(_, data)
+            -- Log errors but don't fail completely
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    vim.notify("Frontmatter tag extraction warning: " .. line, vim.log.levels.DEBUG)
                 end
             end
-        })
-    end
-    
-    local function process_frontmatter_tags()
-        vim.fn.jobstart(frontmatter_cmd, {
-            stdout_buffered = true,
-            on_stdout = function(_, data)
-                for _, line in ipairs(data) do
-                    if line and line ~= "" then
-                        -- Parse frontmatter tags
-                        -- Handle array format: tags: [tag1, tag2, tag3]
-                        local array_match = line:match("tags:%s*%[([^%]]+)%]")
-                        if array_match then
-                            for tag in array_match:gmatch("([^,]+)") do
-                                tag = normalize_tag(tag)
-                                if tag ~= "" then
-                                    tags[tag] = true
-                                    frequency[tag] = (frequency[tag] or 0) + 1
-                                end
-                            end
-                        else
-                            -- Handle list format: tags: - tag1
-                            local list_match = line:match("tags:%s*-%s*([^%s]+)")
-                            if list_match then
-                                local tag = normalize_tag(list_match)
-                                if tag ~= "" then
-                                    tags[tag] = true
-                                    frequency[tag] = (frequency[tag] or 0) + 1
-                                end
-                            end
-                        end
-                    end
-                end
-            end,
-            on_exit = function(_, code)
-                callback(tags, frequency)
+        end,
+        on_exit = function(_, code)
+            if code ~= 0 then
+                vim.notify("Frontmatter tag extraction failed with code: " .. code, vim.log.levels.DEBUG)
             end
-        })
-    end
-    
-    process_inline_tags()
+            job_completed()
+        end
+    })
 end
 
--- Synchronous fallback for tag extraction
+-- Improved synchronous fallback for tag extraction
 local function extract_tags_sync(root_dir)
     local tags = {}
     local frequency = {}
     
-    -- Simple find + grep fallback
-    local find_cmd = string.format("find '%s' -name '*.md' -o -name '*.markdown' -o -name '*.txt' | head -n %d", 
-                                   root_dir, config.max_files_scan)
-    local files_result = vim.fn.system(find_cmd)
+    -- Use vim.fs.find for better cross-platform compatibility
+    local files = vim.fs.find(function(name, path)
+        -- Check file extension
+        local ext_match = false
+        for _, pattern in ipairs(config.file_patterns) do
+            local ext = pattern:match("*%.(.+)$")
+            if ext and name:match("%." .. ext .. "$") then
+                ext_match = true
+                break
+            end
+        end
+        
+        if not ext_match then
+            return false
+        end
+        
+        -- Check exclude patterns
+        for _, exclude_pattern in ipairs(config.exclude_patterns) do
+            if path:match(exclude_pattern) then
+                return false
+            end
+        end
+        
+        return true
+    end, {
+        path = root_dir,
+        type = "file",
+        limit = config.max_files_scan
+    })
     
-    if vim.v.shell_error ~= 0 then
+    if not files then
         return tags, frequency
     end
     
-    for file_path in files_result:gmatch("[^\n]+") do
+    local processed = 0
+    for _, file_path in ipairs(files) do
         if vim.fn.filereadable(file_path) == 1 then
-            local lines = vim.fn.readfile(file_path, "", 200) -- Read first 200 lines only for performance
+            local lines = vim.fn.readfile(file_path, "", 100) -- Read first 100 lines only
             
-            for _, line in ipairs(lines) do
-                -- Extract inline tags
-                for tag in line:gmatch("#([a-zA-Z0-9_/-]+)") do
-                    tag = normalize_tag(tag)
-                    if tag ~= "" then
-                        tags[tag] = true
-                        frequency[tag] = (frequency[tag] or 0) + 1
-                    end
+            local in_frontmatter = false
+            local frontmatter_ended = false
+            local in_tags_list = false
+            
+            for i, line in ipairs(lines) do
+                -- Handle YAML frontmatter
+                if i == 1 and line == "---" then
+                    in_frontmatter = true
+                    goto continue
+                elseif in_frontmatter and (line == "---" or line == "...") then
+                    frontmatter_ended = true
+                    in_frontmatter = false
+                    in_tags_list = false
+                    goto continue
                 end
                 
-                -- Extract frontmatter tags
-                local array_match = line:match("tags:%s*%[([^%]]+)%]")
-                if array_match then
-                    for tag in array_match:gmatch("([^,]+)") do
+                if in_frontmatter then
+                    -- Handle tags in frontmatter
+                    local tags_line = line:match("^%s*tags:%s*(.*)$")
+                    if tags_line then
+                        if tags_line:match("^%[.*%]$") then
+                            -- Array format: [tag1, tag2, tag3]
+                            local array_content = tags_line:match("^%[(.*)%]$")
+                            if array_content then
+                                for tag in array_content:gmatch("([^,]+)") do
+                                    tag = normalize_tag(tag)
+                                    if tag then
+                                        tags[tag] = true
+                                        frequency[tag] = (frequency[tag] or 0) + 1
+                                    end
+                                end
+                            end
+                        elseif tags_line == "" then
+                            -- List format starts
+                            in_tags_list = true
+                        else
+                            -- Single tag
+                            local tag = normalize_tag(tags_line)
+                            if tag then
+                                tags[tag] = true
+                                frequency[tag] = (frequency[tag] or 0) + 1
+                            end
+                        end
+                    elseif in_tags_list and line:match("^%s*-%s*") then
+                        -- List item
+                        local list_tag = line:match("^%s*-%s*(.+)$")
+                        if list_tag then
+                            local tag = normalize_tag(list_tag)
+                            if tag then
+                                tags[tag] = true
+                                frequency[tag] = (frequency[tag] or 0) + 1
+                            end
+                        end
+                    elseif in_tags_list and not line:match("^%s*-%s*") and line:match("^%w") then
+                        -- End of tags list
+                        in_tags_list = false
+                    end
+                else
+                    -- Extract inline tags from content
+                    for tag in line:gmatch(config.inline_tag_pattern) do
                         tag = normalize_tag(tag)
-                        if tag ~= "" then
+                        if tag then
                             tags[tag] = true
                             frequency[tag] = (frequency[tag] or 0) + 1
                         end
                     end
                 end
                 
-                local list_match = line:match("tags:%s*-%s*([^%s]+)")
-                if list_match then
-                    local tag = normalize_tag(list_match)
-                    if tag ~= "" then
-                        tags[tag] = true
-                        frequency[tag] = (frequency[tag] or 0) + 1
-                    end
-                end
+                ::continue::
+            end
+            
+            processed = processed + 1
+            -- Yield control periodically
+            if processed % 50 == 0 then
+                vim.schedule(function() end)
             end
         end
     end
@@ -216,13 +374,29 @@ local function extract_tags_sync(root_dir)
     return tags, frequency
 end
 
--- Cache management
+-- Cache management with improved performance
 local function update_tag_cache(callback)
     if is_cache_valid() then
         if callback then callback() end
         return
     end
     
+    if tag_cache.is_updating then
+        -- Queue the callback to avoid duplicate work
+        if callback then
+            vim.defer_fn(function()
+                if is_cache_valid() then
+                    callback()
+                else
+                    -- Retry after a short delay
+                    update_tag_cache(callback)
+                end
+            end, 100)
+        end
+        return
+    end
+    
+    tag_cache.is_updating = true
     local root_dir = get_root_dir()
     
     local function process_results(tags, frequency)
@@ -236,8 +410,13 @@ local function update_tag_cache(callback)
             })
         end
         
-        -- Sort by frequency (descending)
-        table.sort(tag_list, function(a, b) return a.frequency > b.frequency end)
+        -- Sort by frequency (descending) then alphabetically
+        table.sort(tag_list, function(a, b)
+            if a.frequency == b.frequency then
+                return a.tag < b.tag
+            end
+            return a.frequency > b.frequency
+        end)
         
         -- Limit results for performance
         if #tag_list > MAX_TAG_RESULTS then
@@ -251,31 +430,44 @@ local function update_tag_cache(callback)
         tag_cache.entries = tag_list
         tag_cache.frequency = frequency
         tag_cache.last_update = vim.loop.now()
+        tag_cache.is_updating = false
         
         if callback then callback() end
     end
     
-    if config.async_extraction then
+    if config.async_extraction and has_ripgrep() then
         extract_tags_with_ripgrep(root_dir, process_results)
     else
-        local tags, frequency = extract_tags_sync(root_dir)
-        process_results(tags, frequency)
+        -- Use synchronous extraction in a separate coroutine for better performance
+        vim.schedule(function()
+            local tags, frequency = extract_tags_sync(root_dir)
+            process_results(tags, frequency)
+        end)
     end
 end
 
--- Fuzzy matching implementation
+-- Improved fuzzy matching implementation
 local function fuzzy_match(tag, pattern)
-    if not config.fuzzy_matching then
-        return tag:lower():find(pattern:lower(), 1, true) ~= nil
+    if not pattern or pattern == "" then
+        return true
     end
     
-    pattern = pattern:lower()
-    tag = tag:lower()
+    if not config.fuzzy_matching then
+        if config.case_sensitive then
+            return tag:find(pattern, 1, true) ~= nil
+        else
+            return tag:lower():find(pattern:lower(), 1, true) ~= nil
+        end
+    end
+    
+    -- Case handling
+    local search_tag = config.case_sensitive and tag or tag:lower()
+    local search_pattern = config.case_sensitive and pattern or pattern:lower()
     
     local tag_idx = 1
-    for i = 1, #pattern do
-        local char = pattern:sub(i, i)
-        local found_idx = tag:find(char, tag_idx, true)
+    for i = 1, #search_pattern do
+        local char = search_pattern:sub(i, i)
+        local found_idx = search_tag:find(char, tag_idx, true)
         if not found_idx then
             return false
         end
@@ -284,7 +476,7 @@ local function fuzzy_match(tag, pattern)
     return true
 end
 
--- Calculate fuzzy match score
+-- Calculate fuzzy match score with improved algorithm
 local function calculate_match_score(tag, pattern)
     local base_score = tag_cache.frequency[tag] or 1
     
@@ -292,34 +484,60 @@ local function calculate_match_score(tag, pattern)
         return base_score
     end
     
-    -- Exact prefix match gets highest score
-    if tag:lower():sub(1, #pattern) == pattern:lower() then
-        return base_score * 10
+    -- Case handling for scoring
+    local search_tag = config.case_sensitive and tag or tag:lower()
+    local search_pattern = config.case_sensitive and pattern or pattern:lower()
+    
+    -- Exact match gets highest score
+    if search_tag == search_pattern then
+        return base_score * 100
+    end
+    
+    -- Exact prefix match gets very high score
+    if search_tag:sub(1, #search_pattern) == search_pattern then
+        return base_score * 50
+    end
+    
+    -- Word boundary match gets high score
+    if search_tag:match("^" .. vim.pesc(search_pattern) .. "%W") or search_tag:match("%W" .. vim.pesc(search_pattern) .. "%W") then
+        return base_score * 25
     end
     
     -- Contains pattern gets medium score
-    if tag:lower():find(pattern:lower(), 1, true) then
-        return base_score * 3
+    if search_tag:find(search_pattern, 1, true) then
+        return base_score * 10
     end
     
-    -- Fuzzy match gets base score
-    return base_score
+    -- Fuzzy match gets base score modified by match quality
+    local score_multiplier = 1
+    local consecutive_matches = 0
+    local tag_idx = 1
+    
+    for i = 1, #search_pattern do
+        local char = search_pattern:sub(i, i)
+        local found_idx = search_tag:find(char, tag_idx, true)
+        if found_idx then
+            if found_idx == tag_idx then
+                consecutive_matches = consecutive_matches + 1
+                score_multiplier = score_multiplier + 0.5
+            end
+            tag_idx = found_idx + 1
+        end
+    end
+    
+    return base_score * score_multiplier
 end
 
--- Get completion items
+-- Get completion items with improved performance and sorting
 local function get_completion_items(pattern)
     if not is_cache_valid() then
         return {}
     end
     
     local items = {}
-    local added_count = 0
+    local scored_items = {}
     
     for _, entry in ipairs(tag_cache.entries) do
-        if added_count >= config.max_completion_items then
-            break
-        end
-        
         local tag = entry.tag
         
         -- Skip if pattern doesn't match
@@ -330,36 +548,59 @@ local function get_completion_items(pattern)
         -- Calculate match score
         local score = calculate_match_score(tag, pattern)
         
-        -- Build completion item
-        local item = {
-            label = "#" .. tag,
+        table.insert(scored_items, {
+            tag = tag,
+            frequency = entry.frequency,
+            score = score
+        })
+        
+        ::continue::
+    end
+    
+    -- Sort by score (descending)
+    table.sort(scored_items, function(a, b)
+        return a.score > b.score
+    end)
+    
+    -- Build final completion items
+    local added_count = 0
+    for _, item in ipairs(scored_items) do
+        if added_count >= config.max_completion_items then
+            break
+        end
+        
+        local completion_item = {
+            label = "#" .. item.tag,
             kind = vim.lsp.protocol.CompletionItemKind.Keyword,
-            insertText = tag,
-            detail = string.format("frequency: %d", entry.frequency),
-            sortText = string.format("%08d", 99999999 - score), -- Reverse score for sorting
-            filterText = tag,
-            word = tag, -- For omnifunc compatibility
+            insertText = item.tag,
+            detail = string.format("Used %d times", item.frequency),
+            sortText = string.format("%08d", 99999999 - math.floor(item.score)),
+            filterText = item.tag,
+            word = item.tag, -- For omnifunc compatibility
         }
         
         -- Add documentation for nested tags
-        if config.nested_tag_support and tag:find("/") then
-            local parts = vim.split(tag, "/")
-            item.documentation = {
+        if config.nested_tag_support and item.tag:find("/") then
+            local parts = vim.split(item.tag, "/")
+            completion_item.documentation = {
                 kind = "markdown",
-                value = "**Nested tag:** " .. table.concat(parts, " → ")
+                value = "**Nested tag:** " .. table.concat(parts, " → ") .. "\n\n**Frequency:** " .. item.frequency
+            }
+        else
+            completion_item.documentation = {
+                kind = "markdown", 
+                value = "**Tag:** #" .. item.tag .. "\n\n**Frequency:** " .. item.frequency
             }
         end
         
-        table.insert(items, item)
+        table.insert(items, completion_item)
         added_count = added_count + 1
-        
-        ::continue::
     end
     
     return items
 end
 
--- Completion source for nvim-cmp
+-- Improved completion source for nvim-cmp
 function M.get_completion_source()
     return {
         name = "pebble_tags",
@@ -367,8 +608,8 @@ function M.get_completion_source()
         -- Check if completion should trigger
         is_available = function()
             local buf = vim.api.nvim_get_current_buf()
-            local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
-            return filetype == "markdown" or filetype == "md"
+            local filetype = vim.bo[buf].filetype
+            return filetype == "markdown" or filetype == "md" or filetype == "mdx"
         end,
         
         -- Get trigger characters
@@ -394,10 +635,6 @@ function M.get_completion_source()
             -- Update cache and get items
             update_tag_cache(function()
                 local items = get_completion_items(hash_match)
-                -- Adjust insertText to not include # since it's already typed
-                for _, item in ipairs(items) do
-                    item.insertText = item.insertText or item.label:sub(2) -- Remove # prefix
-                end
                 callback({
                     items = items,
                     isIncomplete = #items >= config.max_completion_items
@@ -405,54 +642,101 @@ function M.get_completion_source()
             end)
         end,
         
-        -- Resolve additional info (optional)
+        -- Resolve additional info
         resolve = function(self, completion_item, callback)
             callback(completion_item)
         end,
     }
 end
 
--- Blink.cmp compatibility
+-- Improved blink.cmp compatibility
 function M.get_blink_source()
-    return {
-        name = "pebble_tags",
+    local source = {}
+    
+    -- Source configuration
+    source.name = "pebble_tags"
+    source.priority = 1000
+    
+    -- Check if available
+    function source.enabled(ctx)
+        if not ctx or not ctx.filetype then
+            local buf = vim.api.nvim_get_current_buf()
+            local filetype = vim.bo[buf].filetype
+            return filetype == "markdown" or filetype == "md" or filetype == "mdx"
+        end
+        return ctx.filetype == "markdown" or ctx.filetype == "md" or ctx.filetype == "mdx"
+    end
+    
+    -- Get trigger characters
+    function source.get_trigger_characters()
+        return { "#" }
+    end
+    
+    -- Should show completion on trigger character
+    function source.should_show_completion_on_trigger_character(ctx, trigger_char)
+        if trigger_char ~= "#" then
+            return false
+        end
         
-        -- Module methods for blink.cmp
-        get_completions = function(self, ctx, callback)
-            if not ctx.line then
-                callback({ items = {} })
-                return
+        -- Only trigger if we're not already in a tag or if this could be a new tag
+        local line_before_cursor = ctx.line and ctx.line:sub(1, ctx.cursor.col - 1) or ""
+        return true  -- Let the get_completions function handle the detailed logic
+    end
+    
+    -- Get completions (main completion function)
+    function source.get_completions(ctx, callback)
+        if not ctx.line then
+            callback({ items = {}, is_incomplete = false })
+            return
+        end
+        
+        -- Check for # trigger
+        local line_before_cursor = ctx.line:sub(1, ctx.cursor.col - 1)
+        local hash_match = line_before_cursor:match(".*#([a-zA-Z0-9_/-]*)$")
+        
+        if not hash_match then
+            callback({ items = {}, is_incomplete = false })
+            return
+        end
+        
+        -- Update cache and get completions asynchronously
+        update_tag_cache(function()
+            local items = get_completion_items(hash_match)
+            
+            -- Convert items for blink.cmp format
+            local blink_items = {}
+            for _, item in ipairs(items) do
+                table.insert(blink_items, {
+                    label = item.label,
+                    kind = item.kind,
+                    detail = item.detail,
+                    documentation = item.documentation,
+                    insertText = item.insertText,
+                    sortText = item.sortText,
+                    filterText = item.filterText,
+                    score = item.score or 1000,
+                })
             end
             
-            -- Check for # trigger
-            local line_before_cursor = ctx.line:sub(1, ctx.cursor.col - 1)
-            local hash_match = line_before_cursor:match(".*#([a-zA-Z0-9_/-]*)$")
-            
-            if not hash_match then
-                callback({ items = {} })
-                return
-            end
-            
-            -- Update cache and get completions
-            update_tag_cache(function()
-                local items = get_completion_items(hash_match)
-                -- Adjust insertText for blink.cmp
-                for _, item in ipairs(items) do
-                    item.insertText = item.insertText or item.label:sub(2) -- Remove # prefix
-                end
-                callback({ items = items })
-            end)
-        end,
-        
-        get_trigger_characters = function()
-            return { "#" }
-        end,
-    }
+            callback({ 
+                items = blink_items, 
+                is_incomplete = #blink_items >= config.max_completion_items 
+            })
+        end)
+    end
+    
+    -- Resolve completion item (optional)
+    function source.resolve(item, callback)
+        callback(item)
+    end
+    
+    return source
 end
 
 -- Force cache refresh
 function M.refresh_cache()
     tag_cache.last_update = 0
+    tag_cache.is_updating = false
     update_tag_cache()
 end
 
@@ -463,30 +747,14 @@ function M.get_cache_stats()
         last_update = tag_cache.last_update,
         cache_age = vim.loop.now() - tag_cache.last_update,
         is_valid = is_cache_valid(),
+        is_updating = tag_cache.is_updating,
         root_dir = tag_cache.root_dir,
+        has_ripgrep = has_ripgrep(),
+        config = config
     }
 end
 
--- Initialize tag completion
-function M.setup(user_config)
-    config = vim.tbl_deep_extend("force", default_config, user_config or {})
-    
-    -- Pre-warm cache
-    update_tag_cache()
-    
-    -- Auto-refresh cache on file changes
-    vim.api.nvim_create_autocmd({"BufWritePost", "BufNewFile"}, {
-        pattern = {"*.md", "*.markdown", "*.txt"},
-        callback = function()
-            -- Delay refresh to avoid performance issues during active editing
-            vim.defer_fn(function()
-                M.refresh_cache()
-            end, 1000)
-        end,
-    })
-end
-
--- Manual trigger for completion (for testing)
+-- Manual trigger for completion
 function M.trigger_completion()
     local line = vim.api.nvim_get_current_line()
     local col = vim.api.nvim_win_get_cursor(0)[2]
@@ -499,8 +767,47 @@ function M.trigger_completion()
     
     -- Trigger completion manually
     vim.schedule(function()
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", false)
+        -- Try different completion triggers
+        if vim.fn.exists("*cmp#complete") == 1 then
+            vim.fn["cmp#complete"]()
+        else
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", false)
+        end
     end)
+end
+
+-- Initialize tag completion
+function M.setup(user_config)
+    config = vim.tbl_deep_extend("force", default_config, user_config or {})
+    
+    -- Pre-warm cache asynchronously
+    vim.schedule(function()
+        update_tag_cache()
+    end)
+    
+    -- Auto-refresh cache on file changes with debouncing
+    local refresh_timer = nil
+    vim.api.nvim_create_autocmd({"BufWritePost", "BufNewFile", "BufDelete"}, {
+        pattern = vim.list_extend({}, config.file_patterns),
+        callback = function()
+            -- Debounce refresh to avoid excessive cache updates
+            if refresh_timer then
+                refresh_timer:stop()
+            end
+            refresh_timer = vim.defer_fn(function()
+                M.refresh_cache()
+                refresh_timer = nil
+            end, 2000) -- 2 second delay
+        end,
+    })
+    
+    -- Invalidate cache when changing directories
+    vim.api.nvim_create_autocmd("DirChanged", {
+        callback = function()
+            tag_cache.root_dir = nil
+            M.refresh_cache()
+        end,
+    })
 end
 
 return M

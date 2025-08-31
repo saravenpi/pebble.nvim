@@ -1,9 +1,6 @@
 local M = {}
 
--- Performance: Cache git root to avoid repeated system calls
-local _git_root_cache = nil
-local _git_root_cache_time = 0
-local GIT_ROOT_CACHE_TTL = 30000  -- 30 seconds
+-- Git root caching now handled by centralized search utility
 
 local file_cache = {}
 local alias_cache = {}
@@ -109,26 +106,10 @@ local function ensure_file_alias(file_path)
 	alias_cache[file_path] = true
 end
 
---- Get root directory with caching for performance
+--- Get root directory using centralized search utility
 local function get_root_dir()
-	local now = vim.loop.now()
-	-- Use cached git root if still valid
-	if _git_root_cache and (now - _git_root_cache_time) < GIT_ROOT_CACHE_TTL then
-		return _git_root_cache
-	end
-	
-	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-	local root_dir
-	if vim.v.shell_error ~= 0 or git_root == "" then
-		root_dir = vim.fn.getcwd()
-	else
-		root_dir = git_root
-	end
-	
-	-- Cache the result
-	_git_root_cache = root_dir
-	_git_root_cache_time = now
-	return root_dir
+	local search = require("pebble.bases.search")
+	return search.get_root_dir()
 end
 
 --- Build cache of all markdown files using optimized search
@@ -1228,91 +1209,23 @@ local function setup_tags_syntax(opts)
 	})
 end
 
---- Setup completion sources for wiki links
-function M.setup_completion(opts)
-	opts = opts or {}
-	
-	-- Setup cache invalidation for completion
-	local completion = require("pebble.completion")
-	
-	vim.api.nvim_create_autocmd({ "BufWritePost", "BufNewFile", "BufDelete" }, {
-		pattern = "*.md",
-		callback = function()
-			completion.invalidate_cache()
-		end,
-	})
-	
-	-- Try to setup nvim-cmp source
-	local cmp_ok, _ = pcall(require, "cmp")
-	if cmp_ok and opts.nvim_cmp ~= false then
-		-- The cmp source auto-registers itself when loaded
-		require("pebble.cmp_source")
-	end
-	
-	-- Setup blink.cmp source if available
-	local blink_ok, blink = pcall(require, "blink.cmp")
-	if blink_ok and opts.blink_cmp ~= false then
-		local blink_source = require("pebble.blink_source")
-		-- Register with blink.cmp
-		if blink and blink.register_source then
-			blink.register_source(blink_source)
-		end
-	end
-	
-	-- Manual completion command for testing
-	vim.api.nvim_create_user_command("PebbleComplete", function()
-		local is_wiki, query = completion.is_wiki_link_context()
-		if is_wiki then
-			local root_dir = completion.get_root_dir()
-			local completions = completion.get_wiki_completions(query, root_dir)
-			
-			if #completions > 0 then
-				local items = {}
-				for i, comp in ipairs(completions) do
-					if i <= 10 then -- Show only first 10 for demo
-						table.insert(items, string.format("%d. %s (%s)", i, comp.label, comp.detail))
-					end
-				end
-				vim.notify("Completions:\n" .. table.concat(items, "\n"), vim.log.levels.INFO)
-			else
-				vim.notify("No completions found for: " .. query, vim.log.levels.INFO)
-			end
-		else
-			vim.notify("Not in a wiki link context. Type [[ first.", vim.log.levels.WARN)
-		end
-	end, { desc = "Test wiki link completions" })
-end
 
---- Setup completion sources
+--- Setup completion sources using the new manager
 function M.setup_completion(completion_opts)
 	completion_opts = completion_opts or {}
 	
-	-- Setup nvim-cmp source
-	if completion_opts.nvim_cmp ~= false then
-		local nvim_cmp_ok, nvim_cmp = pcall(require, "pebble.completion.nvim_cmp")
-		if nvim_cmp_ok and nvim_cmp.is_available() then
-			nvim_cmp.register(completion_opts.nvim_cmp or {})
-			vim.notify("Pebble: nvim-cmp completion source registered", vim.log.levels.INFO)
-		elseif completion_opts.nvim_cmp ~= nil then
-			vim.notify("Pebble: nvim-cmp not available but requested in config", vim.log.levels.WARN)
-		end
-	end
+	-- Use the new completion manager
+	local completion_manager = require("pebble.completion.manager")
 	
-	-- Setup blink.cmp source
-	if completion_opts.blink_cmp ~= false then
-		local blink_cmp_ok, blink_cmp = pcall(require, "pebble.completion.blink_cmp")
-		if blink_cmp_ok and blink_cmp.is_available() then
-			blink_cmp.register(completion_opts.blink_cmp or {})
-			vim.notify("Pebble: blink.cmp completion source registered", vim.log.levels.INFO)
-		elseif completion_opts.blink_cmp ~= nil then
-			vim.notify("Pebble: blink.cmp not available but requested in config", vim.log.levels.WARN)
-		end
-	end
+	-- Setup and register all sources
+	completion_manager.setup(completion_opts)
+	completion_manager.register_all_sources()
+	completion_manager.setup_commands()
 	
-	-- Check for ripgrep
+	-- Check for ripgrep and warn if not available
 	local search_ok, search = pcall(require, "pebble.bases.search")
 	if search_ok and not search.has_ripgrep() then
-		vim.notify("Pebble: ripgrep not found - text search completions will be disabled. Install ripgrep for full functionality.", vim.log.levels.WARN)
+		vim.notify("Pebble: ripgrep not found - file discovery will be slower. Install ripgrep for optimal performance.", vim.log.levels.WARN)
 	end
 end
 
@@ -1326,10 +1239,9 @@ function M.setup(opts)
 		search.setup(opts.search)
 	end
 
-	-- Setup tag completion system
+	-- Setup completion system
 	if opts.completion ~= false then
-		local completion = require("pebble.completion")
-		completion.setup(opts.completion or {})
+		M.setup_completion(opts.completion or {})
 	end
 
 	-- Setup tags syntax highlighting
@@ -1542,6 +1454,42 @@ function M.setup(opts)
 		end,
 		{ desc = "Run tag completion tests" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleDiagnose",
+		function()
+			M.diagnose()
+		end,
+		{ desc = "Run pebble diagnostics" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleReset",
+		function()
+			M.reset()
+		end,
+		{ desc = "Reset all pebble caches and state" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleBuildCache",
+		function()
+			M.build_file_cache_with_progress()
+		end,
+		{ desc = "Build file cache with progress notification" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleBaseAsync",
+		function(opts)
+			if opts.args ~= "" then
+				M.open_base_async(opts.args, function(success, err)
+					if not success then
+						vim.notify("Failed to open base: " .. (err or "unknown error"), vim.log.levels.ERROR)
+					end
+				end)
+			else
+				vim.notify("Usage: :PebbleBaseAsync <base_file_path>", vim.log.levels.WARN)
+			end
+		end,
+		{ desc = "Open base view asynchronously", nargs = "?", complete = "file" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1656,6 +1604,49 @@ end
 --- Access to completion functionality
 function M.get_completion()
 	return require("pebble.completion")
+end
+
+--- Access to bases functionality with enhanced features
+function M.get_bases()
+	return require("pebble.bases")
+end
+
+--- Access to search functionality
+function M.get_search()
+	return require("pebble.bases.search")
+end
+
+--- Diagnostic function to check pebble health
+function M.diagnose()
+	local bases = require("pebble.bases")
+	return bases.diagnose()
+end
+
+--- Reset all caches and state
+function M.reset()
+	local bases = require("pebble.bases")
+	bases.reset()
+	
+	-- Reset local caches
+	invalidate_graph_caches()
+	cache_valid = false
+	
+	vim.notify("All pebble caches reset", vim.log.levels.INFO)
+end
+
+--- Async version of open_base for better performance
+function M.open_base_async(base_path, callback)
+	local bases = require("pebble.bases")
+	return bases.open_base_async(base_path, callback)
+end
+
+--- Enhanced file building with progress notification
+function M.build_file_cache_with_progress()
+	vim.notify("Building file cache...", vim.log.levels.INFO)
+	
+	build_file_cache_async(function()
+		vim.notify("File cache built with " .. vim.tbl_count(file_cache) .. " entries", vim.log.levels.INFO)
+	end)
 end
 
 return M

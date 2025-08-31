@@ -70,18 +70,26 @@ function source:should_show_completion_on_trigger_character(trigger_character, l
 		return false
 	end
 	
-	-- Show for [[ (wiki links)
-	if trigger_character == "[" and line_before_cursor:match("%[$") then
+	-- Show for [[ (wiki links) - check for double bracket
+	if trigger_character == "[" and line_before_cursor:match("%[%[$") then
 		return true
 	end
 	
-	-- Show for ]( (markdown links)
-	if trigger_character == "(" and line_before_cursor:match("%]$") then
+	-- Show for ]( (markdown links) - check for bracket followed by paren
+	if trigger_character == "(" and line_before_cursor:match("%]%($") then
 		return true
 	end
 	
-	-- Show if manually triggered
-	return triggered_manually
+	-- Show if manually triggered or if we're in completion context
+	if triggered_manually then
+		return true
+	end
+	
+	-- Check if we're inside existing contexts
+	local is_wiki, _ = completion.is_wiki_link_context()
+	local is_markdown, _ = completion.is_markdown_link_context()
+	
+	return is_wiki or is_markdown
 end
 
 --- blink.cmp source: get completions
@@ -94,6 +102,33 @@ function source:get_completions(context, callback)
 
 	local line = context.line
 	local col = context.cursor[2] + 1 -- blink.cmp uses 0-based indexing
+	
+	-- Check if we should provide completions based on context
+	local should_complete = false
+	
+	-- Check for [[ (wiki links)
+	if line:sub(math.max(1, col - 1), col) == "[[" then
+		should_complete = true
+	end
+	
+	-- Check for ]( (markdown links)
+	if line:sub(math.max(1, col - 1), col) == "](" then
+		should_complete = true
+	end
+	
+	-- Check if we're inside existing wiki or markdown link contexts
+	local is_wiki, _ = completion.is_wiki_link_context()
+	local is_markdown, _ = completion.is_markdown_link_context()
+	
+	if is_wiki or is_markdown then
+		should_complete = true
+	end
+	
+	-- If no completion context, return empty
+	if not should_complete then
+		callback({ items = {}, is_incomplete = false })
+		return
+	end
 	
 	-- Get completions based on context
 	local items = completion.get_completions_for_context(line, col)

@@ -43,9 +43,16 @@ local function check_telescope()
 	local conf_ok, conf = pcall(require, 'telescope.config')
 	local actions_ok, actions = pcall(require, 'telescope.actions')
 	local action_state_ok, action_state = pcall(require, 'telescope.actions.state')
+	local previewers_ok, previewers = pcall(require, 'telescope.previewers')
 	
 	if not (pickers_ok and finders_ok and conf_ok and actions_ok and action_state_ok) then
-		vim.notify("Telescope modules not available. Please ensure telescope.nvim is properly installed", vim.log.levels.ERROR)
+		vim.notify("Essential telescope modules not available. Please ensure telescope.nvim is properly installed", vim.log.levels.ERROR)
+		return false, nil
+	end
+	
+	-- Check if config values are available
+	if not conf.values then
+		vim.notify("Telescope configuration not initialized. Please ensure telescope.setup() has been called", vim.log.levels.ERROR)
 		return false, nil
 	end
 	
@@ -55,7 +62,8 @@ local function check_telescope()
 		finders = finders,
 		conf = conf,
 		actions = actions,
-		action_state = action_state
+		action_state = action_state,
+		previewers = previewers_ok and previewers or nil
 	}
 end
 
@@ -203,7 +211,8 @@ function M.open_base_view(base_data, files)
 		end
 	end
 	
-	local picker = pickers.new({}, {
+	-- Enhanced picker configuration
+	local picker_opts = {
 		prompt_title = "Base: " .. (base_data.name or "View"),
 		finder = finders.new_table({
 			results = display_files,
@@ -227,7 +236,7 @@ function M.open_base_view(base_data, files)
 				}
 			end,
 		}),
-		sorter = conf.values.generic_sorter({}),
+		sorter = conf.values.generic_sorter and conf.values.generic_sorter({}) or conf.values.file_sorter({}),
 		attach_mappings = function(prompt_bufnr, map)
 			actions.select_default:replace(function()
 				actions.close(prompt_bufnr)
@@ -240,20 +249,49 @@ function M.open_base_view(base_data, files)
 				end
 				
 				if selection and selection.value and selection.value.path and selection.value.path ~= "" then
-					if vim.fn.filereadable(selection.value.path) == 1 then
-						vim.cmd('edit ' .. vim.fn.fnameescape(selection.value.path))
+					local path = selection.value.path
+					if vim.fn.filereadable(path) == 1 then
+						-- Use pcall to safely open file
+						local ok, err = pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(path))
+						if not ok then
+							vim.notify("Error opening file: " .. tostring(err), vim.log.levels.ERROR)
+						end
 					else
-						vim.notify("File not found: " .. selection.value.path, vim.log.levels.WARN)
+						vim.notify("File not found: " .. path, vim.log.levels.WARN)
 					end
 				else
 					vim.notify("No valid file selected", vim.log.levels.WARN)
 				end
 			end)
+			
+			-- Add additional keybindings for enhanced functionality
+			if telescope_modules.actions then
+				map('i', '<C-d>', function()
+					local selection = action_state.get_selected_entry()
+					if selection and selection.value and selection.value.path then
+						vim.notify("File: " .. selection.value.path, vim.log.levels.INFO)
+					end
+				end)
+			end
+			
 			return true
 		end,
-	})
+	}
 	
-	picker:find()
+	-- Add previewer if available and files exist
+	if telescope_modules.previewers and #display_files > 0 and not display_files[1]._empty then
+		picker_opts.previewer = telescope_modules.previewers.vim_buffer_cat.new({
+			title = "Preview",
+		})
+	end
+	
+	local picker = pickers.new({}, picker_opts)
+	
+	-- Safely start the picker
+	local ok, err = pcall(function() picker:find() end)
+	if not ok then
+		vim.notify("Error opening telescope picker: " .. tostring(err), vim.log.levels.ERROR)
+	end
 end
 
 -- Keep the render_view function for backward compatibility, but make it simple

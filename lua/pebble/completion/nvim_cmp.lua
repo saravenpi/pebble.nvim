@@ -28,6 +28,7 @@ function M.register(opts)
 		max_item_count = opts.max_item_count or 50,
 		trigger_characters = opts.trigger_characters or { "[", "(" },
 		keyword_pattern = opts.keyword_pattern or [[\k\+]],
+		keyword_length = opts.keyword_length or 0,
 	}, opts)
 
 	-- Register the source
@@ -59,8 +60,36 @@ function source:complete(request, callback)
 		return
 	end
 
+	-- Get line and column info
 	local line = request.context.cursor_line
 	local col = request.context.cursor.col
+	
+	-- Check if we should trigger completion based on context
+	local should_complete = false
+	
+	-- Check for [[ (wiki links)
+	if line:sub(math.max(1, col - 1), col) == "[[" then
+		should_complete = true
+	end
+	
+	-- Check for ]( (markdown links)
+	if line:sub(math.max(1, col - 1), col) == "](" then
+		should_complete = true
+	end
+	
+	-- Check if we're inside existing wiki or markdown link contexts
+	local is_wiki, _ = completion.is_wiki_link_context()
+	local is_markdown, _ = completion.is_markdown_link_context()
+	
+	if is_wiki or is_markdown then
+		should_complete = true
+	end
+	
+	-- If no completion context, return empty
+	if not should_complete then
+		callback({ items = {}, isIncomplete = false })
+		return
+	end
 	
 	-- Get completions based on context
 	local items = completion.get_completions_for_context(line, col)

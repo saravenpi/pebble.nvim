@@ -169,52 +169,92 @@ local function extract_note_metadata(file_path)
 	}
 end
 
--- Get all markdown files using ripgrep for speed
+-- Get all markdown files using optimized search with async support
 local function get_all_notes(root_dir)
-	local search = require("pebble.bases.search")
-	
-	-- Check cache validity
-	local now = vim.loop.now()
-	if notes_cache.data and (now - cache_timestamp) < CACHE_TTL then
-		return notes_cache.data
-	end
-	
-	-- Use ripgrep to find markdown files
-	local files = search.find_markdown_files_rg(root_dir)
-	
-	if not files or #files == 0 then
-		notes_cache.data = {}
+	-- Wrap in error handling
+	local ok, result = pcall(function()
+		local search = require("pebble.bases.search")
+		
+		-- Check cache validity
+		local now = vim.loop.now()
+		if notes_cache.data and (now - cache_timestamp) < CACHE_TTL then
+			return notes_cache.data
+		end
+		
+		-- Use optimized search with multiple fallback strategies
+		local files = {}
+		
+		-- Try ripgrep first (fastest)
+		if search.has_ripgrep() then
+			files = search.find_markdown_files_sync(root_dir)
+		end
+		
+		-- Fallback 1: vim.fs.find (Neovim 0.8+)
+		if (#files == 0 or not files) and vim.fs and vim.fs.find then
+			files = vim.fs.find(function(name)
+				return name:match("%.md$")
+			end, {
+				path = root_dir,
+				type = "file",
+				limit = CACHE_MAX_SIZE,
+			})
+		end
+		
+		-- Fallback 2: vim.fn.glob (most compatible)
+		if (#files == 0 or not files) then
+			local glob_pattern = root_dir .. "/**/*.md"
+			local glob_result = vim.fn.glob(glob_pattern, false, true)
+			files = glob_result or {}
+		end
+		
+		if not files or #files == 0 then
+			-- Cache empty result to avoid repeated expensive searches
+			notes_cache.data = {}
+			cache_timestamp = now
+			return {}
+		end
+		
+		local notes = {}
+		local processed = 0
+		
+		-- Process files with improved batching and error handling
+		for _, file_path in ipairs(files) do
+			-- Validate file path
+			if type(file_path) == "string" and file_path ~= "" and vim.fn.filereadable(file_path) == 1 then
+				local ok_extract, metadata = pcall(extract_note_metadata, file_path)
+				if ok_extract and metadata then
+					table.insert(notes, metadata)
+					processed = processed + 1
+				end
+				
+				-- Limit processing for performance
+				if processed >= CACHE_MAX_SIZE then
+					break
+				end
+				
+				-- Yield control every 25 files (more frequent for responsiveness)
+				if processed % 25 == 0 then
+					vim.schedule(function() end)
+				end
+			end
+		end
+		
+		-- Cache the results
+		notes_cache.data = notes
 		cache_timestamp = now
+		
+		return notes
+	end)
+	
+	-- Return empty list on error and cache the failure
+	if not ok then
+		-- Cache empty result to avoid repeated failed attempts
+		notes_cache.data = {}
+		cache_timestamp = vim.loop.now()
 		return {}
 	end
 	
-	local notes = {}
-	local processed = 0
-	
-	-- Process files in batches to avoid blocking
-	for _, file_path in ipairs(files) do
-		if vim.fn.filereadable(file_path) == 1 then
-			local metadata = extract_note_metadata(file_path)
-			table.insert(notes, metadata)
-			
-			processed = processed + 1
-			-- Limit cache size for performance
-			if processed >= CACHE_MAX_SIZE then
-				break
-			end
-			
-			-- Yield control periodically
-			if processed % 50 == 0 then
-				vim.schedule(function() end)
-			end
-		end
-	end
-	
-	-- Cache the results
-	notes_cache.data = notes
-	cache_timestamp = now
-	
-	return notes
+	return result or {}
 end
 
 -- Invalidate cache when files change
@@ -306,8 +346,17 @@ end
 
 -- Check if we're inside wiki link brackets
 function M.is_wiki_link_context()
-	local line = vim.api.nvim_get_current_line()
-	local col = vim.api.nvim_win_get_cursor(0)[2]
+	local ok, line = pcall(vim.api.nvim_get_current_line)
+	if not ok or not line then
+		return false, ""
+	end
+	
+	local cursor_ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
+	if not cursor_ok or not cursor or not cursor[2] then
+		return false, ""
+	end
+	
+	local col = cursor[2]
 	
 	-- Find the position of [[ before cursor
 	local bracket_start = nil
@@ -331,7 +380,7 @@ function M.is_wiki_link_context()
 	-- Extract the query text between [[ and current cursor
 	local query_start = bracket_start + 2
 	local query_end = col
-	local query = line:sub(query_start, query_end)
+	local query = line:sub(query_start, query_end) or ""
 	
 	-- Handle display text (|) - only complete the link part
 	local pipe_pos = query:find("|")
@@ -342,16 +391,10 @@ function M.is_wiki_link_context()
 	return true, query
 end
 
--- Get root directory for searching notes
+-- Get root directory using centralized utility
 function M.get_root_dir()
-	-- Try git root first
-	local git_root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n", "")
-	if vim.v.shell_error == 0 and git_root ~= "" then
-		return git_root
-	end
-	
-	-- Fallback to current working directory
-	return vim.fn.getcwd()
+	local search = require("pebble.bases.search")
+	return search.get_root_dir()
 end
 
 --- Check if completion is enabled for current buffer
@@ -360,35 +403,324 @@ function M.is_completion_enabled()
 	return vim.bo.filetype == "markdown"
 end
 
+-- Check if we're inside markdown link brackets
+function M.is_markdown_link_context()
+	local ok, line = pcall(vim.api.nvim_get_current_line)
+	if not ok or not line then
+		return false, ""
+	end
+	
+	local cursor_ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
+	if not cursor_ok or not cursor or not cursor[2] then
+		return false, ""
+	end
+	
+	local col = cursor[2]
+	
+	-- Find the position of ]( before cursor for markdown links
+	local paren_start = nil
+	for i = col, 1, -1 do
+		local char_pair = line:sub(i, i + 1)
+		if char_pair == "](" then
+			paren_start = i + 1
+			break
+		elseif char_pair == ")" or line:sub(i, i) == "\n" then
+			break
+		end
+	end
+	
+	if not paren_start then
+		return false, ""
+	end
+	
+	-- Find the position of ) after cursor (if any)
+	local paren_end = line:find(")", col + 1)
+	
+	-- Extract the query text between ]( and current cursor
+	local query_start = paren_start + 1
+	local query_end = col
+	local query = line:sub(query_start, query_end) or ""
+	
+	return true, query
+end
+
+-- Main completion function that determines context and returns appropriate completions
+function M.get_completions_for_context(line, col)
+	-- Ensure parameters are valid
+	if not line or not col then
+		return {}
+	end
+	
+	-- Wrap in error handling to prevent crashes
+	local ok, result = pcall(function()
+		-- Check for wiki link context first ([[)
+		local is_wiki, wiki_query = M.is_wiki_link_context()
+		if is_wiki then
+			local root_dir = M.get_root_dir()
+			local completions = M.get_wiki_completions(wiki_query, root_dir)
+			
+			-- Convert to completion format with textEdit for replacing partial text
+			for _, comp in ipairs(completions) do
+				-- Find the start of the current query to replace it properly
+				local query_start_col = math.max(0, col - #wiki_query)
+				comp.textEdit = {
+					range = {
+						start = { line = 0, character = query_start_col },
+						["end"] = { line = 0, character = col }
+					},
+					newText = comp.insertText or comp.label
+				}
+				comp.data = comp.data or {}
+				comp.data.type = "wiki_link"
+			end
+			
+			return completions
+		end
+		
+		-- Check for markdown link context ]()
+		local is_markdown, markdown_query = M.is_markdown_link_context()
+		if is_markdown then
+			local root_dir = M.get_root_dir()
+			local completions = M.get_markdown_link_completions(markdown_query, root_dir)
+			
+			-- Convert to completion format with textEdit for replacing partial text
+			for _, comp in ipairs(completions) do
+				-- Find the start of the current query to replace it properly
+				local query_start_col = math.max(0, col - #markdown_query)
+				comp.textEdit = {
+					range = {
+						start = { line = 0, character = query_start_col },
+						["end"] = { line = 0, character = col }
+					},
+					newText = comp.insertText or comp.label
+				}
+				comp.data = comp.data or {}
+				comp.data.type = "file_path"
+			end
+			
+			return completions
+		end
+		
+		-- No relevant completion context found
+		return {}
+	end)
+	
+	-- If an error occurred, return empty completions
+	if not ok then
+		return {}
+	end
+	
+	return result or {}
+end
+
+-- Get completion items for markdown link paths ]()
+function M.get_markdown_link_completions(query, root_dir)
+	local notes = get_all_notes(root_dir)
+	if not notes or #notes == 0 then
+		return {}
+	end
+	
+	local completions = {}
+	query = query or ""
+	
+	for _, note in ipairs(notes) do
+		-- For markdown links, we want the relative path
+		local relative_path = note.relative_path
+		local filename_score = calculate_fuzzy_score(query, relative_path)
+		local title_score = calculate_fuzzy_score(query, note.title)
+		
+		local best_score = math.max(filename_score, title_score)
+		
+		-- Only include items with a reasonable score
+		if best_score > 0 then
+			-- Use relative path for markdown links
+			local insert_text = relative_path
+			
+			table.insert(completions, {
+				label = note.display_name,
+				insertText = insert_text,
+				kind = 17, -- File kind for LSP
+				detail = relative_path,
+				documentation = {
+					kind = "markdown",
+					value = string.format("**Markdown Link Path**\n\nFile: `%s`\nTitle: %s", 
+						relative_path,
+						note.title
+					)
+				},
+				sortText = string.format("%04d_%s", 9999 - math.floor(best_score), insert_text),
+				score = best_score,
+				note_metadata = note
+			})
+		end
+	end
+	
+	-- Sort by score (highest first)
+	table.sort(completions, function(a, b)
+		return a.score > b.score
+	end)
+	
+	-- Limit results for performance
+	local max_results = 50
+	if #completions > max_results then
+		local limited = {}
+		for i = 1, max_results do
+			table.insert(limited, completions[i])
+		end
+		completions = limited
+	end
+	
+	return completions
+end
+
 --- Get statistics about completion cache
 function M.get_stats()
-	local now = vim.loop.hrtime() / 1000000
-	local wiki_cache = completion_cache.wiki_links or { items = {}, timestamp = 0 }
-	local files_cache = completion_cache.files or { items = {}, timestamp = 0 }
-	
+	local now = vim.loop.now()
 	return {
-		cache_valid = is_cache_valid("wiki_links"),
-		cache_size = #wiki_cache.items + #files_cache.items,
-		cache_age = now - math.max(wiki_cache.timestamp, files_cache.timestamp),
+		cache_valid = notes_cache.data and (now - cache_timestamp) < CACHE_TTL,
+		cache_size = notes_cache.data and #notes_cache.data or 0,
+		cache_age = now - cache_timestamp,
 		cache_ttl = CACHE_TTL,
-		wiki_links_count = #wiki_cache.items,
-		files_count = #files_cache.items,
-		text_search_cached_queries = vim.tbl_count(completion_cache) - 3, -- Subtract the 3 main cache types
+		cache_max_size = CACHE_MAX_SIZE
 	}
 end
 
---- Invalidate completion cache
-function M.invalidate_cache()
-	completion_cache = {
-		wiki_links = { items = {}, timestamp = 0 },
-		files = { items = {}, timestamp = 0 },
-		text_search = { items = {}, timestamp = 0 }
-	}
+-- Check if we're inside markdown link parentheses ]()
+function M.is_markdown_link_context()
+	local line = vim.api.nvim_get_current_line()
+	local col = vim.api.nvim_win_get_cursor(0)[2]
+	
+	-- Find the position of ]( before cursor
+	local bracket_start = nil
+	for i = col, 1, -1 do
+		local char_pair = line:sub(i, i + 1)
+		if char_pair == "](" then
+			bracket_start = i
+			break
+		elseif char_pair == ")" or line:sub(i, i) == "\n" then
+			break
+		end
+	end
+	
+	if not bracket_start then
+		return false, ""
+	end
+	
+	-- Extract the query text between ]( and current cursor
+	local query_start = bracket_start + 2
+	local query_end = col
+	local query = line:sub(query_start, query_end)
+	
+	return true, query
+end
+
+-- Get completion items for markdown links ](path)
+function M.get_markdown_link_completions(query, root_dir)
+	local notes = get_all_notes(root_dir)
+	if not notes or #notes == 0 then
+		return {}
+	end
+	
+	local completions = {}
+	query = query or ""
+	
+	for _, note in ipairs(notes) do
+		-- For markdown links, we want to complete with relative paths
+		local relative_path = note.relative_path
+		
+		-- Calculate scores for relative path and filename
+		local path_score = calculate_fuzzy_score(query, relative_path)
+		local filename_score = calculate_fuzzy_score(query, note.filename)
+		
+		local best_score = math.max(path_score, filename_score)
+		
+		-- Only include items with a reasonable score
+		if best_score > 0 then
+			table.insert(completions, {
+				label = note.display_name,
+				insertText = relative_path,
+				kind = 17, -- Reference kind for LSP
+				detail = relative_path,
+				documentation = {
+					kind = "markdown",
+					value = string.format("**%s**\n\nPath: `%s`\nType: markdown link", 
+						note.display_name, 
+						relative_path
+					)
+				},
+				sortText = string.format("%04d_%s", 9999 - math.floor(best_score), relative_path),
+				score = best_score,
+				note_metadata = note
+			})
+		end
+	end
+	
+	-- Sort by score (highest first)
+	table.sort(completions, function(a, b)
+		return a.score > b.score
+	end)
+	
+	-- Limit results for performance
+	local max_results = 50
+	if #completions > max_results then
+		local limited = {}
+		for i = 1, max_results do
+			table.insert(limited, completions[i])
+		end
+		completions = limited
+	end
+	
+	return completions
+end
+
+-- Get completions for any context (wiki or markdown links)
+function M.get_completions_for_context(line, col)
+	local completions = {}
+	
+	-- Check wiki link context first
+	local is_wiki, wiki_query = M.is_wiki_link_context()
+	if is_wiki then
+		local root_dir = M.get_root_dir()
+		completions = M.get_wiki_completions(wiki_query, root_dir)
+		
+		-- Convert to generic completion format
+		for _, comp in ipairs(completions) do
+			comp.data = comp.data or {}
+			comp.data.type = "wiki_link"
+			comp.data.note_metadata = comp.note_metadata
+		end
+		
+		return completions
+	end
+	
+	-- Check markdown link context
+	local is_markdown, markdown_query = M.is_markdown_link_context()
+	if is_markdown then
+		local root_dir = M.get_root_dir()
+		completions = M.get_markdown_link_completions(markdown_query, root_dir)
+		
+		-- Convert to generic completion format
+		for _, comp in ipairs(completions) do
+			comp.data = comp.data or {}
+			comp.data.type = "file_path"
+			comp.data.note_metadata = comp.note_metadata
+		end
+		
+		return completions
+	end
+	
+	return {}
 end
 
 --- Setup completion with configuration options
 function M.setup(opts)
 	opts = opts or {}
+	
+	-- Setup tag completion if enabled
+	if opts.tags ~= false then
+		local tags = require("pebble.completion.tags")
+		tags.setup(opts.tags or {})
+	end
 	
 	-- Configuration can be stored here if needed
 	-- For now, just ensure the module is initialized

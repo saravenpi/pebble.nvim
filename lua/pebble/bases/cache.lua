@@ -2,10 +2,57 @@ local M = {}
 
 local search = require("pebble.bases.search")
 
-local base_cache = {}
-local file_data_cache = {}
-local cache_timestamp = 0
-local CACHE_TTL = 5000
+-- Centralized cache management
+local cache = {
+	base_data = {},
+	file_data = {},
+	timestamps = {},
+	file_mtimes = {}
+}
+local CACHE_TTL = 10000  -- Increased to 10 seconds for better performance
+
+-- Check if cache is still valid by comparing file modification times
+local function is_cache_valid(cache_key, file_paths)
+	local now = vim.loop.now()
+	local cache_time = cache.timestamps[cache_key]
+	
+	-- Check TTL first
+	if not cache_time or (now - cache_time) > CACHE_TTL then
+		return false
+	end
+	
+	-- Check file modification times if we have file paths
+	if file_paths and type(file_paths) == "table" then
+		for _, path in ipairs(file_paths) do
+			local ok, stat = pcall(vim.loop.fs_stat, path)
+			if ok and stat then
+				local cached_mtime = cache.file_mtimes[path]
+				if not cached_mtime or cached_mtime ~= stat.mtime.sec then
+					return false
+				end
+			else
+				-- File doesn't exist anymore, cache is invalid
+				return false
+			end
+		end
+	end
+	
+	return true
+end
+
+-- Update cache timestamps and file mtimes
+local function update_cache_metadata(cache_key, file_paths)
+	cache.timestamps[cache_key] = vim.loop.now()
+	
+	if file_paths and type(file_paths) == "table" then
+		for _, path in ipairs(file_paths) do
+			local ok, stat = pcall(vim.loop.fs_stat, path)
+			if ok and stat then
+				cache.file_mtimes[path] = stat.mtime.sec
+			end
+		end
+	end
+end
 
 -- Async version for getting markdown files with better performance
 local function get_markdown_files_async(root_dir, callback)
@@ -162,10 +209,11 @@ end
 
 -- Async version for better performance
 function M.get_file_data_async(root_dir, force_refresh, callback)
-	local now = vim.loop.now()
+	local cache_key = "file_data_" .. root_dir
 	
-	if not force_refresh and file_data_cache[root_dir] and (now - cache_timestamp) < CACHE_TTL then
-		callback(file_data_cache[root_dir], nil)
+	-- Check cache validity
+	if not force_refresh and cache.file_data[cache_key] and is_cache_valid(cache_key, nil) then
+		callback(cache.file_data[cache_key], nil)
 		return
 	end
 	
@@ -240,8 +288,8 @@ function M.get_file_data_async(root_dir, force_refresh, callback)
 				vim.schedule(process_batch)
 			else
 				-- All done, cache and return
-				file_data_cache[root_dir] = file_data
-				cache_timestamp = vim.loop.now()
+				cache.file_data[cache_key] = file_data
+				update_cache_metadata(cache_key, files)
 				callback(file_data, nil)
 			end
 		end
@@ -253,10 +301,11 @@ end
 
 -- Synchronous version for backwards compatibility
 function M.get_file_data(root_dir, force_refresh)
-	local now = vim.loop.now()
+	local cache_key = "file_data_" .. root_dir
 	
-	if not force_refresh and file_data_cache[root_dir] and (now - cache_timestamp) < CACHE_TTL then
-		return file_data_cache[root_dir]
+	-- Check cache validity
+	if not force_refresh and cache.file_data[cache_key] and is_cache_valid(cache_key, nil) then
+		return cache.file_data[cache_key]
 	end
 	
 	local files = get_markdown_files(root_dir)
@@ -315,41 +364,73 @@ function M.get_file_data(root_dir, force_refresh)
 		end
 	end
 	
-	file_data_cache[root_dir] = file_data
-	cache_timestamp = now
+	cache.file_data[cache_key] = file_data
+	update_cache_metadata(cache_key, files)
 	
 	return file_data
 end
 
 function M.get_base_data(base_path, force_refresh)
-	if not force_refresh and base_cache[base_path] then
-		return base_cache[base_path].data, base_cache[base_path].error
+	local cache_key = "base_data_" .. base_path
+	
+	-- Check cache validity with file modification time
+	if not force_refresh and cache.base_data[cache_key] and is_cache_valid(cache_key, {base_path}) then
+		return cache.base_data[cache_key].data, cache.base_data[cache_key].error
 	end
 	
 	local parser = require("pebble.bases.parser")
 	local base_data, err = parser.parse_base_file(base_path)
 	
 	if base_data then
-		base_cache[base_path] = {
+		cache.base_data[cache_key] = {
 			data = base_data,
-			error = nil,
-			timestamp = vim.loop.now()
+			error = nil
 		}
 	else
-		base_cache[base_path] = {
+		cache.base_data[cache_key] = {
 			data = nil,
-			error = err,
-			timestamp = vim.loop.now()
+			error = err
 		}
 	end
+	
+	update_cache_metadata(cache_key, {base_path})
 	
 	return base_data, err
 end
 
-function M.clear_cache()
-	base_cache = {}
-	file_data_cache = {}
-	cache_timestamp = 0
+-- Enhanced cache clearing with selective options
+function M.clear_cache(cache_type)
+	if cache_type == "base" then
+		cache.base_data = {}
+	elseif cache_type == "files" then
+		cache.file_data = {}
+		cache.file_mtimes = {}
+	else
+		-- Clear all caches
+		cache.base_data = {}
+		cache.file_data = {}
+		cache.timestamps = {}
+		cache.file_mtimes = {}
+	end
+	
+	-- Also clear content cache from filters
+	local filters = require("pebble.bases.filters")
+	pcall(filters.clear_content_cache)
+	
+	-- Clear search cache
+	local search = require("pebble.bases.search")
+	pcall(search.clear_cache)
+end
+
+-- Get cache statistics for debugging
+function M.get_cache_stats()
+	return {
+		base_data_entries = vim.tbl_count(cache.base_data),
+		file_data_entries = vim.tbl_count(cache.file_data),
+		timestamps = vim.tbl_count(cache.timestamps),
+		file_mtimes = vim.tbl_count(cache.file_mtimes),
+		ttl = CACHE_TTL
+	}
 end
 
 return M
