@@ -386,4 +386,13 @@ function M.invalidate_cache()
 	}
 end
 
+--- Setup completion with configuration options
+function M.setup(opts)
+	opts = opts or {}
+	
+	-- Configuration can be stored here if needed
+	-- For now, just ensure the module is initialized
+	return true
+end
+
 return M
