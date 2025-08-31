@@ -1201,16 +1201,42 @@ local function setup_tags_syntax(opts)
 end
 
 
---- Setup completion sources using the new manager
+--- Setup completion sources using the new manager with enhanced validation
 function M.setup_completion(completion_opts)
 	completion_opts = completion_opts or {}
 	
-	-- Use the new completion manager
-	local completion_manager = require("pebble.completion.manager")
+	-- Validate configuration if config module is available
+	local config_ok, config_module = pcall(require, "pebble.completion.config")
+	if config_ok then
+		local validated_config, errors, warnings = config_module.apply_config({ completion = completion_opts })
+		
+		if not validated_config then
+			vim.notify("Pebble completion setup failed due to configuration errors", vim.log.levels.ERROR)
+			return false
+		end
+		
+		completion_opts = validated_config.completion
+	end
 	
-	-- Setup and register all sources
-	completion_manager.setup(completion_opts)
-	completion_manager.register_all_sources()
+	-- Use the new completion manager
+	local manager_ok, completion_manager = pcall(require, "pebble.completion.manager")
+	if not manager_ok then
+		vim.notify("Pebble completion manager not found: " .. tostring(completion_manager), vim.log.levels.ERROR)
+		return false
+	end
+	
+	-- Setup and register all sources with error handling
+	local setup_success = completion_manager.setup(completion_opts)
+	if not setup_success then
+		vim.notify("Pebble completion manager setup failed", vim.log.levels.ERROR)
+		return false
+	end
+	
+	local register_success = completion_manager.register_all_sources()
+	if not register_success then
+		vim.notify("Pebble completion source registration failed", vim.log.levels.WARN)
+	end
+	
 	completion_manager.setup_commands()
 	
 	-- Check for ripgrep and warn if not available
@@ -1218,11 +1244,26 @@ function M.setup_completion(completion_opts)
 	if search_ok and not search.has_ripgrep() then
 		vim.notify("Pebble: ripgrep not found - file discovery will be slower. Install ripgrep for optimal performance.", vim.log.levels.WARN)
 	end
+	
+	return true
 end
 
---- Initialize the plugin with configuration options
+--- Initialize the plugin with configuration options and enhanced validation
 function M.setup(opts)
 	opts = opts or {}
+
+	-- Apply configuration validation and defaults
+	local config_ok, config_module = pcall(require, "pebble.completion.config")
+	if config_ok then
+		local validated_config, errors, warnings = config_module.apply_config(opts, "safe")
+		
+		if validated_config then
+			opts = validated_config
+		else
+			vim.notify("Pebble setup failed due to configuration errors. Run :PebbleCompletionWizard for help.", vim.log.levels.ERROR)
+			return false
+		end
+	end
 
 	-- Configure search optimization with ripgrep
 	local search = require("pebble.bases.search")
@@ -1230,9 +1271,12 @@ function M.setup(opts)
 		search.setup(opts.search)
 	end
 
-	-- Setup completion system
-	if opts.completion ~= false then
-		M.setup_completion(opts.completion or {})
+	-- Setup completion system with enhanced error handling
+	if opts.completion and opts.completion.enabled ~= false then
+		local completion_success = M.setup_completion(opts.completion)
+		if not completion_success then
+			vim.notify("Pebble completion setup failed. Run :PebbleValidateSetup for diagnosis.", vim.log.levels.WARN)
+		end
 	end
 
 	-- Setup tags syntax highlighting
@@ -1433,10 +1477,39 @@ function M.setup(opts)
 			local config = require("pebble.completion.config")
 			local wizard_config = config.setup_wizard()
 			if wizard_config then
-				vim.notify("Tag completion configured! Restart Neovim to apply changes.", vim.log.levels.INFO)
+				vim.notify("Completion configured! Configuration shown above.", vim.log.levels.INFO)
 			end
 		end,
-		{ desc = "Run tag completion setup wizard" }
+		{ desc = "Run pebble completion setup wizard" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleCompletionWizard",
+		function()
+			local config = require("pebble.completion.config")
+			config.setup_wizard()
+		end,
+		{ desc = "Run interactive completion setup wizard" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleConfigPreset",
+		function(opts)
+			local config = require("pebble.completion.config")
+			local preset_name = opts.args
+			
+			if preset_name == "" then
+				local presets = config.list_presets()
+				vim.notify("Available presets: " .. table.concat(presets, ", "), vim.log.levels.INFO)
+				return
+			end
+			
+			local preset_config = config.get_preset(preset_name)
+			if preset_config then
+				vim.notify("Preset '" .. preset_name .. "' configuration:\n" .. vim.inspect(preset_config), vim.log.levels.INFO)
+			else
+				vim.notify("Preset '" .. preset_name .. "' not found", vim.log.levels.ERROR)
+			end
+		end,
+		{ desc = "Show or list completion configuration presets", nargs = "?" }
 	)
 	vim.api.nvim_create_user_command(
 		"PebbleTestTags",

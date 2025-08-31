@@ -1,289 +1,365 @@
+-- Enhanced configuration and validation for pebble.nvim completion
 local M = {}
 
--- Default tag extraction patterns optimized for performance
-M.default_patterns = {
-    -- Inline tags: #tag, #category/subcategory
-    inline = {
-        simple = "#([a-zA-Z0-9_-]+)",
-        nested = "#([a-zA-Z0-9_/-]+)",
-        complex = "#([a-zA-Z0-9_][a-zA-Z0-9_/-]*[a-zA-Z0-9_]|[a-zA-Z0-9_])",
+-- Default configuration templates
+local DEFAULT_CONFIGS = {
+    minimal = {
+        completion = {
+            enabled = true,
+            nvim_cmp = { enabled = true },
+            blink_cmp = { enabled = true },
+        }
     },
     
-    -- YAML frontmatter patterns
-    frontmatter = {
-        -- Array format: tags: [tag1, tag2, tag3]
-        array = "tags:\\s*\\[([^\\]]+)\\]",
-        
-        -- List format: tags: \n  - tag1 \n  - tag2
-        list_item = "^\\s*-\\s+([a-zA-Z0-9_/-]+)",
-        
-        -- Single value: tags: single-tag
-        single = "tags:\\s*([a-zA-Z0-9_/-]+)\\s*$",
-        
-        -- Categories format: categories: [cat1, cat2]
-        categories = "categories:\\s*\\[([^\\]]+)\\]",
-    }
-}
-
--- Preset configurations for different use cases
-M.presets = {
-    -- Maximum performance - basic patterns only
+    safe = {
+        completion = {
+            enabled = true,
+            debug = false,
+            prevent_conflicts = true,
+            nvim_cmp = {
+                enabled = true,
+                priority = 100,
+                max_item_count = 25,
+                filetype_setup = true,
+                auto_add_to_sources = true,
+            },
+            blink_cmp = {
+                enabled = true,
+                priority = 100,
+                max_item_count = 25,
+            },
+        }
+    },
+    
     performance = {
-        inline_tag_pattern = M.default_patterns.inline.simple,
-        frontmatter_tag_pattern = M.default_patterns.frontmatter.array,
-        file_patterns = { "*.md" },
-        max_files_scan = 500,
-        cache_ttl = 120000,  -- 2 minutes
-        async_extraction = true,
-        max_completion_items = 30,
+        completion = {
+            enabled = true,
+            cache_ttl = 60000, -- 1 minute
+            cache_max_size = 1000,
+            debug = false,
+            nvim_cmp = {
+                enabled = true,
+                priority = 150,
+                max_item_count = 15, -- Fewer items for better performance
+                filetype_setup = true,
+                auto_add_to_sources = false, -- Manual setup for better control
+            },
+            blink_cmp = { enabled = false }, -- Disable to avoid conflicts
+        }
     },
     
-    -- Balanced - good performance with more features
-    balanced = {
-        inline_tag_pattern = M.default_patterns.inline.nested,
-        frontmatter_tag_pattern = M.default_patterns.frontmatter.array .. "|" .. M.default_patterns.frontmatter.list_item,
-        file_patterns = { "*.md", "*.markdown" },
-        max_files_scan = 1000,
-        cache_ttl = 60000,  -- 1 minute
-        async_extraction = true,
-        fuzzy_matching = true,
-        nested_tag_support = true,
-        max_completion_items = 50,
-    },
-    
-    -- Comprehensive - all features enabled
-    comprehensive = {
-        inline_tag_pattern = M.default_patterns.inline.complex,
-        frontmatter_tag_pattern = 
-            M.default_patterns.frontmatter.array .. "|" ..
-            M.default_patterns.frontmatter.list_item .. "|" ..
-            M.default_patterns.frontmatter.single .. "|" ..
-            M.default_patterns.frontmatter.categories,
-        file_patterns = { "*.md", "*.markdown", "*.txt", "*.org" },
-        max_files_scan = 2000,
-        cache_ttl = 30000,  -- 30 seconds for fresh results
-        async_extraction = true,
-        fuzzy_matching = true,
-        nested_tag_support = true,
-        max_completion_items = 100,
-        frequency_weight = 0.6,
-        recency_weight = 0.4,
-    },
-    
-    -- Obsidian-style configuration
-    obsidian = {
-        inline_tag_pattern = "#([a-zA-Z0-9_][a-zA-Z0-9_/-]*)",
-        frontmatter_tag_pattern = "tags:\\s*\\[([^\\]]+)\\]",
-        file_patterns = { "*.md" },
-        max_files_scan = 1000,
-        cache_ttl = 60000,
-        async_extraction = true,
-        fuzzy_matching = true,
-        nested_tag_support = true,
-        max_completion_items = 50,
-        trigger_pattern = "#",
-    },
-    
-    -- Logseq-style configuration
-    logseq = {
-        inline_tag_pattern = "#([a-zA-Z0-9_-]+)",
-        frontmatter_tag_pattern = "tags::\\s*([^\\n]+)",
-        file_patterns = { "*.md" },
-        max_files_scan = 800,
-        cache_ttl = 45000,
-        async_extraction = true,
-        fuzzy_matching = true,
-        nested_tag_support = false,  -- Logseq uses different nesting
-        max_completion_items = 40,
-    },
+    debug = {
+        completion = {
+            enabled = true,
+            debug = true,
+            prevent_conflicts = false,
+            nvim_cmp = {
+                enabled = true,
+                priority = 100,
+                max_item_count = 50,
+                debug = true,
+                filetype_setup = true,
+                auto_add_to_sources = true,
+            },
+            blink_cmp = {
+                enabled = true,
+                priority = 100,
+                max_item_count = 50,
+                debug = true,
+            },
+        }
+    }
 }
 
--- Build configuration from preset and overrides
-function M.build_config(preset_name, overrides)
-    overrides = overrides or {}
-    
-    local base_config
-    if preset_name and M.presets[preset_name] then
-        base_config = vim.deepcopy(M.presets[preset_name])
-    else
-        base_config = vim.deepcopy(M.presets.balanced)
-    end
-    
-    return vim.tbl_deep_extend("force", base_config, overrides)
-end
-
--- Validate configuration
-function M.validate_config(config)
-    local errors = {}
-    
-    -- Check required fields
-    if not config.inline_tag_pattern or config.inline_tag_pattern == "" then
-        table.insert(errors, "inline_tag_pattern is required")
-    end
-    
-    if not config.file_patterns or #config.file_patterns == 0 then
-        table.insert(errors, "file_patterns must contain at least one pattern")
-    end
-    
-    -- Validate numeric fields
-    local numeric_fields = {
-        "max_files_scan", "cache_ttl", "max_completion_items",
-        "frequency_weight", "recency_weight"
+-- Configuration validation schema
+local CONFIG_SCHEMA = {
+    completion = {
+        type = "table",
+        fields = {
+            enabled = { type = "boolean", default = true },
+            debug = { type = "boolean", default = false },
+            prevent_conflicts = { type = "boolean", default = true },
+            cache_ttl = { type = "number", default = 30000, min = 1000 },
+            cache_max_size = { type = "number", default = 2000, min = 100 },
+            nvim_cmp = {
+                type = "table",
+                fields = {
+                    enabled = { type = "boolean", default = true },
+                    priority = { type = "number", default = 100, min = 1, max = 1000 },
+                    max_item_count = { type = "number", default = 50, min = 1, max = 200 },
+                    trigger_characters = { type = "table", default = { "[", "(" } },
+                    keyword_length = { type = "number", default = 0, min = 0, max = 10 },
+                    filetype_setup = { type = "boolean", default = true },
+                    auto_add_to_sources = { type = "boolean", default = true },
+                    debug = { type = "boolean", default = false },
+                }
+            },
+            blink_cmp = {
+                type = "table", 
+                fields = {
+                    enabled = { type = "boolean", default = true },
+                    priority = { type = "number", default = 100, min = 1, max = 1000 },
+                    max_item_count = { type = "number", default = 50, min = 1, max = 200 },
+                    trigger_characters = { type = "table", default = { "[", "(" } },
+                    debug = { type = "boolean", default = false },
+                }
+            }
+        }
     }
+}
+
+-- Validate configuration against schema
+function M.validate_config(config, schema, path)
+    path = path or ""
+    local errors = {}
+    local warnings = {}
     
-    for _, field in ipairs(numeric_fields) do
-        if config[field] and type(config[field]) ~= "number" then
-            table.insert(errors, field .. " must be a number")
+    if not config or type(config) ~= "table" then
+        table.insert(errors, path .. ": expected table, got " .. type(config))
+        return errors, warnings
+    end
+    
+    -- Check each field in schema
+    for field, field_schema in pairs(schema) do
+        local field_path = path == "" and field or (path .. "." .. field)
+        local field_value = config[field]
+        
+        if field_schema.type == "table" and field_schema.fields then
+            -- Nested table validation
+            if field_value == nil then
+                config[field] = {}
+                field_value = config[field]
+            elseif type(field_value) ~= "table" then
+                table.insert(errors, field_path .. ": expected table, got " .. type(field_value))
+                config[field] = {}
+                field_value = config[field]
+            end
+            
+            local sub_errors, sub_warnings = M.validate_config(field_value, field_schema.fields, field_path)
+            vim.list_extend(errors, sub_errors)
+            vim.list_extend(warnings, sub_warnings)
+            
+        else
+            -- Simple field validation
+            if field_value == nil then
+                if field_schema.default ~= nil then
+                    config[field] = field_schema.default
+                end
+            else
+                -- Type validation
+                if field_schema.type and type(field_value) ~= field_schema.type then
+                    table.insert(errors, field_path .. ": expected " .. field_schema.type .. ", got " .. type(field_value))
+                    if field_schema.default ~= nil then
+                        config[field] = field_schema.default
+                        table.insert(warnings, field_path .. ": reset to default value")
+                    end
+                end
+                
+                -- Range validation for numbers
+                if field_schema.type == "number" and type(field_value) == "number" then
+                    if field_schema.min and field_value < field_schema.min then
+                        table.insert(warnings, field_path .. ": value " .. field_value .. " below minimum " .. field_schema.min)
+                        config[field] = field_schema.min
+                    elseif field_schema.max and field_value > field_schema.max then
+                        table.insert(warnings, field_path .. ": value " .. field_value .. " above maximum " .. field_schema.max)
+                        config[field] = field_schema.max
+                    end
+                end
+            end
         end
     end
     
-    -- Validate weights sum to reasonable range
-    if config.frequency_weight and config.recency_weight then
-        local sum = config.frequency_weight + config.recency_weight
-        if sum > 1.5 or sum < 0.5 then
-            table.insert(errors, "frequency_weight + recency_weight should be close to 1.0")
-        end
-    end
-    
-    -- Validate ripgrep patterns
-    if config.inline_tag_pattern then
-        local ok = pcall(vim.fn.matchadd, "Test", config.inline_tag_pattern)
-        if not ok then
-            table.insert(errors, "inline_tag_pattern is not a valid regex pattern")
-        end
-    end
-    
-    return #errors == 0, errors
+    return errors, warnings
 end
 
--- Get suggested configuration based on environment
-function M.detect_environment()
-    local suggestions = {}
+-- Get a validated configuration
+function M.get_validated_config(user_config, preset)
+    preset = preset or "safe"
+    local base_config = vim.deepcopy(DEFAULT_CONFIGS[preset] or DEFAULT_CONFIGS.safe)
     
-    -- Check if in Obsidian vault (has .obsidian directory)
-    if vim.fn.isdirectory(".obsidian") == 1 then
-        suggestions.preset = "obsidian"
-        suggestions.reason = "Detected Obsidian vault"
-    
-    -- Check if using Logseq (has logseq directory or config)
-    elseif vim.fn.isdirectory("logseq") == 1 or vim.fn.filereadable("logseq/config.edn") == 1 then
-        suggestions.preset = "logseq"
-        suggestions.reason = "Detected Logseq directory"
-    
-    -- Check repository size to suggest performance preset
-    else
-        local search = require("pebble.bases.search")
-        local root_dir = search.get_root_dir()
-        local md_files = search.find_markdown_files_sync(root_dir)
-        local count = #md_files
-            
-        if count > 2000 then
-            suggestions.preset = "performance"
-            suggestions.reason = "Large repository detected (" .. count .. " markdown files)"
-        elseif count > 500 then
-            suggestions.preset = "balanced"
-            suggestions.reason = "Medium repository detected (" .. count .. " markdown files)"
-        else
-            suggestions.preset = "comprehensive"
-            suggestions.reason = "Small repository detected (" .. count .. " markdown files)"
-        end
+    -- Merge user config
+    if user_config then
+        base_config = vim.tbl_deep_extend("force", base_config, user_config)
     end
     
-    return suggestions
+    -- Validate and normalize
+    local errors, warnings = M.validate_config(base_config, CONFIG_SCHEMA)
+    
+    return base_config, errors, warnings
 end
 
 -- Interactive configuration wizard
 function M.setup_wizard()
-    local suggestions = M.detect_environment()
+    local responses = {}
     
-    print("=== Pebble Tag Completion Setup Wizard ===")
-    print("Environment detected: " .. suggestions.reason)
-    print("Suggested preset: " .. suggestions.preset)
-    print("")
-    
-    -- Ask user for confirmation
-    local choice = vim.fn.input("Use suggested preset '" .. suggestions.preset .. "'? (y/n/custom): ")
-    
-    if choice:lower() == "n" then
-        print("\nAvailable presets:")
-        for name, _ in pairs(M.presets) do
-            print("  - " .. name)
+    -- Helper function for prompts
+    local function prompt(question, default, type_check)
+        local input = vim.fn.input(question .. (default and (" [" .. tostring(default) .. "]") or "") .. ": ")
+        
+        if input == "" and default ~= nil then
+            return default
         end
-        local preset_choice = vim.fn.input("Enter preset name: ")
-        if M.presets[preset_choice] then
-            suggestions.preset = preset_choice
+        
+        if type_check == "boolean" then
+            local lower_input = input:lower()
+            if lower_input == "true" or lower_input == "yes" or lower_input == "y" or lower_input == "1" then
+                return true
+            elseif lower_input == "false" or lower_input == "no" or lower_input == "n" or lower_input == "0" then
+                return false
+            else
+                return default
+            end
+        elseif type_check == "number" then
+            local num = tonumber(input)
+            return num or default
         else
-            print("Invalid preset, using balanced")
-            suggestions.preset = "balanced"
+            return input
         end
-    elseif choice:lower() == "custom" then
-        print("\nCustom configuration not implemented in wizard yet.")
-        print("Please configure manually in your init.lua")
-        return nil
     end
     
-    local config = M.build_config(suggestions.preset)
-    local is_valid, errors = M.validate_config(config)
+    print("=== Pebble Completion Setup Wizard ===")
+    print("This will help you configure pebble.nvim completion.")
+    print("Press Enter to accept defaults.")
+    print("")
     
-    if not is_valid then
-        print("Configuration validation failed:")
+    -- Basic settings
+    responses.enabled = prompt("Enable completion?", true, "boolean")
+    if not responses.enabled then
+        return { completion = { enabled = false } }
+    end
+    
+    responses.debug = prompt("Enable debug mode?", false, "boolean")
+    responses.prevent_conflicts = prompt("Prevent registration conflicts?", true, "boolean")
+    
+    -- Performance settings
+    local performance_level = prompt("Performance level (1=high performance, 2=balanced, 3=feature rich)", "2", "number")
+    
+    if performance_level == 1 then
+        responses.cache_ttl = 60000
+        responses.max_item_count = 15
+        responses.auto_add_to_sources = false
+    elseif performance_level == 3 then
+        responses.cache_ttl = 15000
+        responses.max_item_count = 100
+        responses.auto_add_to_sources = true
+    else
+        responses.cache_ttl = 30000
+        responses.max_item_count = 50
+        responses.auto_add_to_sources = true
+    end
+    
+    -- Engine selection
+    local has_nvim_cmp = pcall(require, "cmp")
+    local has_blink_cmp = pcall(require, "blink.cmp")
+    
+    print("")
+    print("Available completion engines:")
+    if has_nvim_cmp then print("  ✓ nvim-cmp") else print("  ✗ nvim-cmp") end
+    if has_blink_cmp then print("  ✓ blink.cmp") else print("  ✗ blink.cmp") end
+    print("")
+    
+    local use_nvim_cmp = has_nvim_cmp and prompt("Use nvim-cmp?", true, "boolean")
+    local use_blink_cmp = has_blink_cmp and not use_nvim_cmp and prompt("Use blink.cmp?", true, "boolean")
+    
+    if not use_nvim_cmp and not use_blink_cmp then
+        print("Warning: No completion engines selected. Completion will be disabled.")
+    end
+    
+    -- Build configuration
+    local config = {
+        completion = {
+            enabled = responses.enabled,
+            debug = responses.debug,
+            prevent_conflicts = responses.prevent_conflicts,
+            cache_ttl = responses.cache_ttl,
+            nvim_cmp = {
+                enabled = use_nvim_cmp,
+                max_item_count = responses.max_item_count,
+                auto_add_to_sources = responses.auto_add_to_sources,
+                debug = responses.debug,
+            },
+            blink_cmp = {
+                enabled = use_blink_cmp,
+                max_item_count = responses.max_item_count,
+                debug = responses.debug,
+            },
+        }
+    }
+    
+    -- Validate the generated config
+    local validated_config, errors, warnings = M.get_validated_config(config)
+    
+    if #errors > 0 then
+        print("Configuration errors detected:")
         for _, error in ipairs(errors) do
-            print("  - " .. error)
+            print("  ✗ " .. error)
         end
         return nil
     end
     
-    print("\nConfiguration created successfully!")
-    print("Preset: " .. suggestions.preset)
-    print("Add this to your init.lua:")
+    if #warnings > 0 then
+        print("Configuration warnings:")
+        for _, warning in ipairs(warnings) do
+            print("  ⚠ " .. warning)
+        end
+    end
+    
     print("")
-    print("require('pebble').setup({")
-    print("  completion = {")
-    print("    tags = require('pebble.completion.config').build_config('" .. suggestions.preset .. "')")
-    print("  }")
-    print("})")
+    print("Generated configuration:")
+    print(vim.inspect(validated_config))
     print("")
     
-    return config
+    local save_config = prompt("Save this configuration to your init.lua?", false, "boolean")
+    
+    if save_config then
+        local config_str = "require('pebble').setup(" .. vim.inspect(validated_config, { indent = "  " }) .. ")"
+        print("")
+        print("Add this to your Neovim configuration:")
+        print("")
+        print(config_str)
+        print("")
+        
+        -- Try to write to clipboard if available
+        local has_clipboard = vim.fn.has('clipboard') == 1
+        if has_clipboard then
+            vim.fn.setreg('+', config_str)
+            print("Configuration copied to clipboard!")
+        end
+    end
+    
+    return validated_config
 end
 
--- Performance optimization suggestions
-function M.get_performance_suggestions(current_config)
-    local suggestions = {}
+-- Get preset configurations
+function M.get_preset(name)
+    return DEFAULT_CONFIGS[name] and vim.deepcopy(DEFAULT_CONFIGS[name]) or nil
+end
+
+-- List available presets
+function M.list_presets()
+    local presets = {}
+    for name, _ in pairs(DEFAULT_CONFIGS) do
+        table.insert(presets, name)
+    end
+    return presets
+end
+
+-- Apply configuration with validation
+function M.apply_config(config, preset)
+    local validated_config, errors, warnings = M.get_validated_config(config, preset)
     
-    -- Check cache TTL
-    if current_config.cache_ttl and current_config.cache_ttl < 30000 then
-        table.insert(suggestions, {
-            type = "performance",
-            message = "Consider increasing cache_ttl to reduce file scanning frequency"
-        })
+    if #errors > 0 then
+        local error_msg = "Pebble configuration errors:\n" .. table.concat(errors, "\n")
+        vim.notify(error_msg, vim.log.levels.ERROR)
+        return false, errors, warnings
     end
     
-    -- Check max files scan
-    if current_config.max_files_scan and current_config.max_files_scan > 1500 then
-        table.insert(suggestions, {
-            type = "performance",
-            message = "Consider reducing max_files_scan for better performance in large repositories"
-        })
+    if #warnings > 0 then
+        local warning_msg = "Pebble configuration warnings:\n" .. table.concat(warnings, "\n")
+        vim.notify(warning_msg, vim.log.levels.WARN)
     end
     
-    -- Check async extraction
-    if not current_config.async_extraction then
-        table.insert(suggestions, {
-            type = "performance",
-            message = "Enable async_extraction for better UI responsiveness"
-        })
-    end
-    
-    -- Check completion items
-    if current_config.max_completion_items and current_config.max_completion_items > 80 then
-        table.insert(suggestions, {
-            type = "ui",
-            message = "Consider reducing max_completion_items for cleaner completion menu"
-        })
-    end
-    
-    return suggestions
+    return validated_config, errors, warnings
 end
 
 return M
