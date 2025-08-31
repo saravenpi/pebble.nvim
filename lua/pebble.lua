@@ -131,27 +131,87 @@ local function get_root_dir()
 	return root_dir
 end
 
---- Build cache of all markdown files in the current repository or directory
-local function build_file_cache()
+--- Build cache of all markdown files using optimized search
+local function build_file_cache_async(callback)
 	file_cache = {}
 	-- Don't clear alias_cache - keep it for performance
 	local cwd = get_root_dir()
 
-	-- Performance: Use lazy loading with reduced initial scan limit
-	local md_files = vim.fs.find(function(name)
-		return name:match("%.md$")
-	end, {
-		path = cwd,
-		type = "file",
-		limit = 500,  -- Reduced for performance - lazy load more if needed
-		upward = false,
-	})
+	-- Use optimized search with ripgrep
+	local search = require("pebble.bases.search")
+	
+	search.find_markdown_files_async(cwd, function(md_files, err)
+		if err or not md_files then
+			-- Fallback to synchronous method
+			build_file_cache_sync()
+			if callback then callback() end
+			return
+		end
 
-	-- Performance: Process files in batches to avoid blocking
+		-- Performance: Process files in batches to avoid blocking
+		local batch_size = 100  -- Increased for async processing
+		local processed = 0
+		local current_batch = 0
+		local total_files = #md_files
+		
+		local function process_batch()
+			local start_idx = current_batch * batch_size + 1
+			local end_idx = math.min(start_idx + batch_size - 1, total_files)
+			
+			for i = start_idx, end_idx do
+				local file_path = md_files[i]
+				local filename = vim.fn.fnamemodify(file_path, ":t:r")
+				if not file_cache[filename] then
+					file_cache[filename] = {}
+				end
+				table.insert(file_cache[filename], file_path)
+				processed = processed + 1
+			end
+			
+			current_batch = current_batch + 1
+			
+			-- Schedule next batch or finish
+			if end_idx < total_files then
+				vim.schedule(process_batch)
+			else
+				cache_valid = true
+				if callback then callback() end
+			end
+		end
+		
+		-- Start processing
+		process_batch()
+	end)
+end
+
+--- Synchronous fallback for building file cache
+local function build_file_cache_sync()
+	file_cache = {}
+	local cwd = get_root_dir()
+
+	-- Try optimized search first
+	local search = require("pebble.bases.search")
+	local md_files
+	
+	if search.has_ripgrep() then
+		md_files = search.find_markdown_files_sync(cwd)
+	else
+		-- Fallback to vim.fs.find if ripgrep is not available
+		md_files = vim.fs.find(function(name)
+			return name:match("%.md$")
+		end, {
+			path = cwd,
+			type = "file",
+			limit = 1000,  -- Increased limit
+			upward = false,
+		})
+	end
+
+	-- Process files with better batching
 	local batch_size = 50
 	local processed = 0
 	
-	for _, file_path in ipairs(md_files) do
+	for _, file_path in ipairs(md_files or {}) do
 		local filename = vim.fn.fnamemodify(file_path, ":t:r")
 		if not file_cache[filename] then
 			file_cache[filename] = {}
@@ -166,6 +226,11 @@ local function build_file_cache()
 	end
 
 	cache_valid = true
+end
+
+--- Build cache (backwards compatibility wrapper)
+local function build_file_cache()
+	build_file_cache_sync()
 end
 
 --- Invalidate the file cache when files change
@@ -839,8 +904,60 @@ function M.create_link_and_file()
 	end
 end
 
---- Find all links in a file with caching for performance
-local function find_links_in_file(file_path)
+--- Find all links in a file using ripgrep for better performance
+local function find_links_in_file_async(file_path, callback)
+	if not vim.fn.filereadable(file_path) then
+		callback({}, nil)
+		return
+	end
+
+	local file_stat = vim.loop.fs_stat(file_path)
+	if not file_stat then
+		callback({}, nil)
+		return
+	end
+
+	local cache_key = file_path
+	local cached_entry = link_cache[cache_key]
+
+	if cached_entry and cached_entry.mtime >= file_stat.mtime.sec then
+		callback(cached_entry.links, nil)
+		return
+	end
+
+	-- Use ripgrep for fast link extraction
+	local search = require("pebble.bases.search")
+	if search.has_ripgrep() then
+		search.extract_links_async(vim.fn.fnamemodify(file_path, ":h"), function(all_links, err)
+			if err then
+				-- Fallback to synchronous method
+				local fallback_links = find_links_in_file_sync(file_path)
+				callback(fallback_links, nil)
+				return
+			end
+			
+			-- Extract links for this specific file
+			local file_links = all_links[vim.fn.fnamemodify(file_path, ":t:r")] or {}
+			local links = {}
+			for _, link_info in ipairs(file_links) do
+				if link_info.file == file_path then
+					-- This would need to be extracted differently - let's use fallback for now
+					local fallback_links = find_links_in_file_sync(file_path)
+					callback(fallback_links, nil)
+					return
+				end
+			end
+			
+			callback(links, nil)
+		end)
+	else
+		local fallback_links = find_links_in_file_sync(file_path)
+		callback(fallback_links, nil)
+	end
+end
+
+--- Synchronous version of find_links_in_file with optimized patterns
+local function find_links_in_file_sync(file_path)
 	if not vim.fn.filereadable(file_path) then
 		return {}
 	end
@@ -858,9 +975,12 @@ local function find_links_in_file(file_path)
 	end
 
 	local links = {}
-	local lines = vim.fn.readfile(file_path, "", 100)
+	-- Optimized: read more lines for better link detection, but with size limit
+	local max_lines = 500  -- Reasonable limit
+	local lines = vim.fn.readfile(file_path, "", max_lines)
 
 	for _, line in ipairs(lines) do
+		-- Optimized obsidian link pattern matching
 		local start = 1
 		while true do
 			local s, e = line:find("%[%[[^%]]+%]%]", start)
@@ -868,12 +988,13 @@ local function find_links_in_file(file_path)
 				break
 			end
 			local link = line:sub(s + 2, e - 2)
-			if link ~= "" then
+			if link ~= "" and link ~= file_path then  -- Avoid self-references
 				table.insert(links, link)
 			end
 			start = e + 1
 		end
 
+		-- Optimized markdown link pattern matching
 		start = 1
 		while true do
 			local s, e = line:find("%[[^%]]*%]%([^%)]+%)", start)
@@ -884,9 +1005,10 @@ local function find_links_in_file(file_path)
 			local paren_end = line:find("%)", paren_start)
 			if paren_start and paren_end then
 				local link = line:sub(paren_start + 1, paren_end - 1)
-				if link:match("%.md$") or not link:match("%.") then
+				-- Only process markdown files and relative links
+				if (link:match("%.md$") or not link:match("%..")) and not link:match("^https?://") then
 					link = link:gsub("%.md$", "")
-					if link ~= "" then
+					if link ~= "" and link ~= vim.fn.fnamemodify(file_path, ":t:r") then
 						table.insert(links, link)
 					end
 				end
@@ -895,12 +1017,19 @@ local function find_links_in_file(file_path)
 		end
 	end
 
+	-- Cache the result with improved metadata
 	link_cache[cache_key] = {
 		links = links,
 		mtime = file_stat.mtime.sec,
+		timestamp = vim.loop.now()
 	}
 
 	return links
+end
+
+--- Backwards compatibility wrapper
+local function find_links_in_file(file_path)
+	return find_links_in_file_sync(file_path)
 end
 
 -- Removed complex build_comprehensive_graph - was causing performance issues
@@ -1099,9 +1228,109 @@ local function setup_tags_syntax(opts)
 	})
 end
 
+--- Setup completion sources for wiki links
+function M.setup_completion(opts)
+	opts = opts or {}
+	
+	-- Setup cache invalidation for completion
+	local completion = require("pebble.completion")
+	
+	vim.api.nvim_create_autocmd({ "BufWritePost", "BufNewFile", "BufDelete" }, {
+		pattern = "*.md",
+		callback = function()
+			completion.invalidate_cache()
+		end,
+	})
+	
+	-- Try to setup nvim-cmp source
+	local cmp_ok, _ = pcall(require, "cmp")
+	if cmp_ok and opts.nvim_cmp ~= false then
+		-- The cmp source auto-registers itself when loaded
+		require("pebble.cmp_source")
+	end
+	
+	-- Setup blink.cmp source if available
+	local blink_ok, blink = pcall(require, "blink.cmp")
+	if blink_ok and opts.blink_cmp ~= false then
+		local blink_source = require("pebble.blink_source")
+		-- Register with blink.cmp
+		if blink and blink.register_source then
+			blink.register_source(blink_source)
+		end
+	end
+	
+	-- Manual completion command for testing
+	vim.api.nvim_create_user_command("PebbleComplete", function()
+		local is_wiki, query = completion.is_wiki_link_context()
+		if is_wiki then
+			local root_dir = completion.get_root_dir()
+			local completions = completion.get_wiki_completions(query, root_dir)
+			
+			if #completions > 0 then
+				local items = {}
+				for i, comp in ipairs(completions) do
+					if i <= 10 then -- Show only first 10 for demo
+						table.insert(items, string.format("%d. %s (%s)", i, comp.label, comp.detail))
+					end
+				end
+				vim.notify("Completions:\n" .. table.concat(items, "\n"), vim.log.levels.INFO)
+			else
+				vim.notify("No completions found for: " .. query, vim.log.levels.INFO)
+			end
+		else
+			vim.notify("Not in a wiki link context. Type [[ first.", vim.log.levels.WARN)
+		end
+	end, { desc = "Test wiki link completions" })
+end
+
+--- Setup completion sources
+function M.setup_completion(completion_opts)
+	completion_opts = completion_opts or {}
+	
+	-- Setup nvim-cmp source
+	if completion_opts.nvim_cmp ~= false then
+		local nvim_cmp_ok, nvim_cmp = pcall(require, "pebble.completion.nvim_cmp")
+		if nvim_cmp_ok and nvim_cmp.is_available() then
+			nvim_cmp.register(completion_opts.nvim_cmp or {})
+			vim.notify("Pebble: nvim-cmp completion source registered", vim.log.levels.INFO)
+		elseif completion_opts.nvim_cmp ~= nil then
+			vim.notify("Pebble: nvim-cmp not available but requested in config", vim.log.levels.WARN)
+		end
+	end
+	
+	-- Setup blink.cmp source
+	if completion_opts.blink_cmp ~= false then
+		local blink_cmp_ok, blink_cmp = pcall(require, "pebble.completion.blink_cmp")
+		if blink_cmp_ok and blink_cmp.is_available() then
+			blink_cmp.register(completion_opts.blink_cmp or {})
+			vim.notify("Pebble: blink.cmp completion source registered", vim.log.levels.INFO)
+		elseif completion_opts.blink_cmp ~= nil then
+			vim.notify("Pebble: blink.cmp not available but requested in config", vim.log.levels.WARN)
+		end
+	end
+	
+	-- Check for ripgrep
+	local search_ok, search = pcall(require, "pebble.bases.search")
+	if search_ok and not search.has_ripgrep() then
+		vim.notify("Pebble: ripgrep not found - text search completions will be disabled. Install ripgrep for full functionality.", vim.log.levels.WARN)
+	end
+end
+
 --- Initialize the plugin with configuration options
 function M.setup(opts)
 	opts = opts or {}
+
+	-- Configure search optimization with ripgrep
+	local search = require("pebble.bases.search")
+	if opts.search then
+		search.setup(opts.search)
+	end
+
+	-- Setup tag completion system
+	if opts.completion ~= false then
+		local completion = require("pebble.completion")
+		completion.setup(opts.completion or {})
+	end
 
 	-- Setup tags syntax highlighting
 	setup_tags_syntax(opts)
@@ -1177,6 +1406,142 @@ function M.setup(opts)
 		end,
 		{ desc = "List and select available bases" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleSearch",
+		function(opts)
+			local search = require("pebble.bases.search")
+			local root_dir = get_root_dir()
+			
+			if opts.args == "" then
+				vim.notify("Usage: :PebbleSearch <pattern>", vim.log.levels.WARN)
+				return
+			end
+			
+			local results, err = search.search_in_files(opts.args, root_dir, {
+				files_with_matches = true,
+				file_type = "md",
+				max_results = 100  -- Reasonable limit for UI
+			})
+			
+			if err then
+				vim.notify("Search error: " .. err, vim.log.levels.ERROR)
+				return
+			end
+			
+			if not results or #results == 0 then
+				vim.notify("No matches found for: " .. opts.args, vim.log.levels.INFO)
+				return
+			end
+			
+			-- Use telescope to display results
+			local telescope_ok, telescope = pcall(require, 'telescope')
+			if not telescope_ok then
+				-- Fallback to quickfix list
+				local qf_items = {}
+				for _, file in ipairs(results) do
+					table.insert(qf_items, {
+						filename = file,
+						text = "Match found"
+					})
+				end
+				vim.fn.setqflist(qf_items)
+				vim.cmd("copen")
+				return
+			end
+			
+			local pickers = require('telescope.pickers')
+			local finders = require('telescope.finders')
+			local conf = require('telescope.config')
+			local actions = require('telescope.actions')
+			local action_state = require('telescope.actions.state')
+			
+			local picker = pickers.new({}, {
+				prompt_title = "Search Results: " .. opts.args,
+				finder = finders.new_table({
+					results = results,
+					entry_maker = function(entry)
+						return {
+							value = entry,
+							display = vim.fn.fnamemodify(entry, ":."),
+							ordinal = entry,
+							path = entry,
+						}
+					end,
+				}),
+				sorter = conf.values.generic_sorter({}),
+				attach_mappings = function(prompt_bufnr, map)
+					actions.select_default:replace(function()
+						actions.close(prompt_bufnr)
+						local selection = action_state.get_selected_entry()
+						if selection then
+							vim.cmd("edit " .. vim.fn.fnameescape(selection.value))
+						end
+					end)
+					return true
+				end,
+			})
+			
+			picker:find()
+		end,
+		{ desc = "Search in markdown files using ripgrep", nargs = "?" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleCompletionStats",
+		function()
+			local completion = require("pebble.completion")
+			local stats = completion.get_stats()
+			print("=== Pebble Completion Statistics ===")
+			print("Cache valid: " .. tostring(stats.cache_valid))
+			print("Cache size: " .. stats.cache_size .. " files")
+			print("Cache age: " .. math.floor(stats.cache_age / 1000) .. " seconds")
+			print("Cache TTL: " .. math.floor(stats.cache_ttl / 1000) .. " seconds")
+		end,
+		{ desc = "Show completion cache statistics" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleCompletionRefresh",
+		function()
+			local completion = require("pebble.completion")
+			completion.refresh_cache()
+			vim.notify("Tag completion cache refreshed", vim.log.levels.INFO)
+		end,
+		{ desc = "Refresh tag completion cache" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleTagsStats",
+		function()
+			local completion = require("pebble.completion")
+			local stats = completion.get_stats()
+			print("=== Pebble Tag Completion Statistics ===")
+			if stats.tags then
+				print("Tag cache entries: " .. stats.tags.entries_count)
+				print("Cache age: " .. math.floor(stats.tags.cache_age / 1000) .. " seconds")
+				print("Cache valid: " .. tostring(stats.tags.is_valid))
+				print("Root directory: " .. (stats.tags.root_dir or "not set"))
+			else
+				print("Tag completion not initialized")
+			end
+		end,
+		{ desc = "Show tag completion statistics" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleTagsSetup",
+		function()
+			local config = require("pebble.completion.config")
+			local wizard_config = config.setup_wizard()
+			if wizard_config then
+				vim.notify("Tag completion configured! Restart Neovim to apply changes.", vim.log.levels.INFO)
+			end
+		end,
+		{ desc = "Run tag completion setup wizard" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleTestTags",
+		function()
+			require("pebble.completion.test").run_all_tests()
+		end,
+		{ desc = "Run tag completion tests" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1249,6 +1614,19 @@ function M.setup(opts)
 					M.init_yaml_header,
 					vim.tbl_extend("force", buf_opts, { desc = "Initialize YAML header" })
 				)
+				
+				-- Tag completion trigger (if completion is enabled)
+				if opts.completion ~= false then
+					vim.keymap.set(
+						"i",
+						"<C-t><C-t>",
+						function()
+							local tags = require("pebble.completion.tags")
+							tags.trigger_completion()
+						end,
+						vim.tbl_extend("force", buf_opts, { desc = "Trigger tag completion" })
+					)
+				end
 			end,
 		})
 		
@@ -1273,6 +1651,11 @@ function M.setup(opts)
 		vim.keymap.set("n", "<leader>mB", function() require("pebble.bases").list_bases() end, { desc = "List available bases" })
 		vim.keymap.set("n", "<leader>mb", function() require("pebble.bases").open_current_base() end, { desc = "Open current/select base view" })
 	end
+end
+
+--- Access to completion functionality
+function M.get_completion()
+	return require("pebble.completion")
 end
 
 return M

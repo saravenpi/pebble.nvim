@@ -1,5 +1,7 @@
 local M = {}
 
+local search = require("pebble.bases.search")
+
 local function parse_yaml(content)
 	-- Simple YAML parser focused on Obsidian base format
 	local lines = vim.split(content, "\n")
@@ -111,23 +113,14 @@ function M.parse_base_file(file_path)
 	return base, nil
 end
 
+-- Async function for finding base files with better performance
+function M.find_base_files_async(root_dir, callback)
+	search.find_base_files_async(root_dir, callback)
+end
+
+-- Synchronous function for backwards compatibility
 function M.find_base_files(root_dir)
-	local bases = {}
-	local cmd = string.format("find '%s' -type f -name '*.base' 2>/dev/null | head -50", root_dir)
-	local result = vim.fn.system(cmd)
-	
-	if vim.v.shell_error == 0 then
-		for path in result:gmatch("[^\n]+") do
-			local name = vim.fn.fnamemodify(path, ":t:r")
-			table.insert(bases, {
-				name = name,
-				path = path,
-				relative_path = vim.fn.fnamemodify(path, ":.")
-			})
-		end
-	end
-	
-	return bases
+	return search.find_base_files_sync(root_dir)
 end
 
 return M

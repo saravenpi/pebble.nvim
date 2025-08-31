@@ -13,6 +13,7 @@ Obsidian-style markdown link navigation and database views for Neovim.
 - **Interactive Graph View**: Visualize your markdown link network
 - **Navigation History**: Go back and forward through your navigation
 - **Link Management**: Create links from selected text
+- **Smart Completion**: Auto-complete wiki links, file paths, and text content using ripgrep
 - **Performance Optimized**: Intelligent caching and git-aware file discovery
 - **Bases Support**: Create and view Obsidian-compatible database views from markdown files
 - **Heading Management**: Increase/decrease heading levels with `+`/`-`
@@ -23,21 +24,110 @@ Obsidian-style markdown link navigation and database views for Neovim.
 ### Dependencies
 
 - **Required**: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) - Used for bases functionality
+- **Required**: [ripgrep](https://github.com/BurntSushi/ripgrep) - Fast file search for completion and search features
 - **Optional**: [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) - Enhanced syntax highlighting
+- **Optional**: [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) - Completion framework support
+- **Optional**: [blink.cmp](https://github.com/Saghen/blink.cmp) - Alternative completion framework support
+
+#### Installing ripgrep
+
+**macOS** (via Homebrew):
+```bash
+brew install ripgrep
+```
+
+**Ubuntu/Debian**:
+```bash
+sudo apt install ripgrep
+```
+
+**Fedora**:
+```bash
+sudo dnf install ripgrep
+```
+
+**Arch Linux**:
+```bash
+sudo pacman -S ripgrep
+```
+
+**Windows** (via Chocolatey):
+```bash
+choco install ripgrep
+```
+
+**Cargo** (cross-platform):
+```bash
+cargo install ripgrep
+```
 
 ### Using lazy.nvim
+
+**Basic setup with completion:**
 ```lua
 {
     "saravenpi/pebble.nvim",
     dependencies = {
         "nvim-telescope/telescope.nvim",
-        -- Optional: enhanced treesitter support
-        -- "nvim-treesitter/nvim-treesitter",
+        "hrsh7th/nvim-cmp", -- Optional: for completion support
+        -- "Saghen/blink.cmp", -- Alternative: blink.cmp support
+        -- "nvim-treesitter/nvim-treesitter", -- Optional: enhanced syntax highlighting
     },
     config = function()
         require('pebble').setup({
             auto_setup_keymaps = true,
-            global_keymaps = false
+            global_keymaps = false,
+            completion = {
+                nvim_cmp = {}, -- Auto-detected, will register if nvim-cmp is available
+                blink_cmp = {}, -- Auto-detected, will register if blink.cmp is available
+            }
+        })
+        
+        -- If using nvim-cmp, add pebble to your sources
+        local cmp = require('cmp')
+        cmp.setup({
+            sources = cmp.config.sources({
+                { name = 'nvim_lsp' },
+                { name = 'pebble' }, -- Add pebble completion
+                { name = 'buffer' },
+                { name = 'path' },
+            })
+        })
+    end
+}
+```
+
+**With blink.cmp:**
+```lua
+{
+    "saravenpi/pebble.nvim",
+    dependencies = {
+        "nvim-telescope/telescope.nvim",
+        "Saghen/blink.cmp",
+    },
+    config = function()
+        require('pebble').setup({
+            completion = {
+                blink_cmp = {
+                    priority = 100,
+                    max_item_count = 50,
+                }
+            }
+        })
+    end
+}
+```
+
+**Minimal setup (no completion):**
+```lua
+{
+    "saravenpi/pebble.nvim",
+    dependencies = {
+        "nvim-telescope/telescope.nvim",
+    },
+    config = function()
+        require('pebble').setup({
+            completion = false -- Disable completion features
         })
     end
 }
@@ -49,9 +139,20 @@ use {
     'saravenpi/pebble.nvim',
     requires = {
         'nvim-telescope/telescope.nvim',
+        'hrsh7th/nvim-cmp', -- Optional
     },
     config = function()
         require('pebble').setup()
+        
+        -- Setup nvim-cmp source if using nvim-cmp
+        local cmp = require('cmp')
+        cmp.setup({
+            sources = cmp.config.sources({
+                { name = 'nvim_lsp' },
+                { name = 'pebble' },
+                { name = 'buffer' },
+            })
+        })
     end
 }
 ```
@@ -77,6 +178,17 @@ use {
 - Use `j/k` or arrow keys to navigate
 - Press `<CR>` to open a file
 - Press `q` or `<Esc>` to close
+
+### Smart Completion
+- **Wiki Links**: Type `[[` to auto-complete note names with advanced fuzzy matching
+  - Matches against filenames, titles from YAML frontmatter, and aliases
+  - Supports both `[[Note Name]]` and `[[Note Name|Display Text]]` patterns
+  - Ultra-fast ripgrep-powered discovery with 30-second intelligent caching
+  - Prioritizes exact matches, prefix matches, and word boundary matches
+- **File Paths**: Type `](` to complete relative file paths for standard markdown links
+- **Text Search**: Type any word (2+ characters) to search and complete from file content across your project
+- All completions work seamlessly with nvim-cmp or blink.cmp
+- Performance optimized: processes up to 2000 notes with batch processing to avoid UI blocking
 
 ### Database Views (Bases)
 - Create `.base` files with YAML configuration
@@ -108,6 +220,10 @@ use {
 | `:PebbleDecreaseHeading` | Decrease markdown heading level |
 | `:PebbleBase [path]` | Open a base view (current file if no path) |
 | `:PebbleBases` | List and select available base files |
+| `:PebbleSearch <pattern>` | Search in markdown files using ripgrep |
+| `:PebbleComplete` | Test wiki link completion in current context |
+| `:PebbleCompletionStats` | Show completion cache statistics |
+| `:PebbleCompletionRefresh` | Refresh completion cache |
 
 ## Default Keymaps
 
@@ -153,9 +269,52 @@ require('pebble').setup({
     auto_setup_keymaps = true,
 
     -- Set up global keymaps (disabled by default)
-    global_keymaps = false
+    global_keymaps = false,
+
+    -- Completion configuration
+    completion = {
+        -- Enable nvim-cmp integration (auto-detected if not specified)
+        nvim_cmp = {
+            priority = 100,
+            max_item_count = 50,
+            trigger_characters = { "[", "(" },
+        },
+        
+        -- Enable blink.cmp integration (auto-detected if not specified)
+        blink_cmp = {
+            priority = 100,
+            max_item_count = 50,
+            trigger_characters = { "[", "(" },
+        },
+    }
 })
 ```
+
+### Completion Features
+
+Pebble provides intelligent completion for markdown files with three types of completions:
+
+1. **Wiki Link Completion** (`[[file-name]]`)
+   - Auto-completes file names when typing `[[`
+   - Shows available markdown files in your project
+   - Uses ripgrep for fast file discovery
+
+2. **File Path Completion** (`[text](path)`)
+   - Auto-completes file paths when typing `](`
+   - Provides relative paths to markdown files
+   - Optimized for current directory context
+
+3. **Text Search Completion**
+   - Searches content across all markdown files using ripgrep
+   - Triggered when typing 2+ character words
+   - Shows matching text with file context
+
+### Performance Characteristics
+
+- **Fast File Discovery**: Uses ripgrep for sub-second file enumeration
+- **Intelligent Caching**: 30-second TTL cache for file lists and completions
+- **Context-Aware**: Only activates in markdown files
+- **Minimal Resource Usage**: Lazy-loaded modules and efficient search patterns
 
 ### Custom Keymaps
 To disable automatic keymaps and set your own:

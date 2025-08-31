@@ -1,9 +1,0 @@
-filters:
-  or:
-    - name: test-task1
-    - name: test-task2
-
-views:
-  - type: table
-    name: Simple Test
-    limit: 10
