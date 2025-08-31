@@ -39,7 +39,24 @@ end
 -- Setup the completion manager
 function M.setup(config)
 	config = config or {}
-	manager_config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, config)
+	
+	-- Handle boolean config values by converting to table format
+	local normalized_config = {}
+	for key, value in pairs(config) do
+		if key == "nvim_cmp" or key == "blink_cmp" then
+			if type(value) == "boolean" then
+				normalized_config[key] = { enabled = value }
+			elseif type(value) == "table" then
+				normalized_config[key] = value
+			else
+				normalized_config[key] = { enabled = false }
+			end
+		else
+			normalized_config[key] = value
+		end
+	end
+	
+	manager_config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, normalized_config)
 	
 	debug_log("Initializing completion manager")
 	
