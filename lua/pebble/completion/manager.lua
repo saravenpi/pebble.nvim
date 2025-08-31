@@ -12,7 +12,7 @@ local DEFAULT_CONFIG = {
 		enabled = true,
 		priority = 100,
 		max_item_count = 50,
-		trigger_characters = { "[", "(" },
+		trigger_characters = { "[", "(", "#" },
 		keyword_length = 0,
 		filetype_setup = true, -- Enable filetype-specific buffer setup
 		auto_add_to_sources = true, -- Automatically add to buffer sources for markdown
@@ -22,7 +22,7 @@ local DEFAULT_CONFIG = {
 		enabled = true,
 		priority = 100,
 		max_item_count = 50,
-		trigger_characters = { "[", "(" },
+		trigger_characters = { "[", "(", "#" },
 		debug = false,
 	},
 	cache_ttl = 30000, -- 30 seconds

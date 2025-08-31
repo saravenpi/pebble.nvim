@@ -1,17 +1,14 @@
 # Test Completion
 
-Test wiki link completion by typing: [[
+## Testing Wiki Links
+Type [[ to trigger wiki link completion.
 
-Test tag completion by typing: #
+## Testing Tags  
+Type # to trigger tag completion: #test #example #project
 
-If completion is working, you should see suggestions when you type the above patterns.
+## Testing Markdown Links
+Type ]( to trigger markdown file completion.
 
-You can run `:CmpDebugSources` to check if pebble completion sources are loaded.
-
-## Test Tags
-#test
-#productivity  
-#example/nested
-
-## Test Files
-This file can be used to test completion functionality.
+## Sample content with tags
+This is a note with #productivity and #notes tags.
+Also includes #development and #testing tags.

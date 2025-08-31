@@ -79,10 +79,13 @@ function M.is_tag_context()
     
     -- Check for # pattern before cursor
     local before_cursor = line:sub(1, col)
-    local tag_start = before_cursor:match("#([%w_/-]*)")
     
-    if tag_start ~= nil then  -- tag_start can be an empty string, which is valid
-        return true, tag_start
+    -- Look for # followed by optional word characters at the end of the string
+    -- This should match: "#", "#test", "#proj", etc.
+    local tag_match = before_cursor:match("#([%w_/-]*)$")
+    
+    if tag_match ~= nil then  -- tag_match can be an empty string, which is valid
+        return true, tag_match
     end
     
     return false, nil
@@ -259,36 +262,35 @@ function M.get_tag_completions(query, root_dir)
         return cached.data
     end
     
-    -- Use async function to extract tags, but we need to make it synchronous for completion
+    -- Try to use synchronous tag extraction first, with fallback
     local tags = {}
+    
+    -- First try the async function with a very short timeout for completion responsiveness
     local completed = false
+    local extraction_error = nil
     
     search.extract_tags_async(root_dir, function(extracted_tags, error)
-        if error then
-            -- Fallback to simple tags if extraction fails
-            tags = {
-                ["example"] = 1,
-                ["todo"] = 1,
-                ["project"] = 1
-            }
-        else
-            tags = extracted_tags or {}
-        end
+        tags = extracted_tags or {}
+        extraction_error = error
         completed = true
     end)
     
-    -- Wait for completion with timeout
-    local timeout = 5000 -- 5 seconds
+    -- Wait for completion with short timeout to keep completion snappy
+    local timeout = 1000 -- 1 second max for completion responsiveness
     local start_time = vim.loop.now()
     while not completed and (vim.loop.now() - start_time) < timeout do
-        vim.wait(10) -- Wait 10ms between checks
+        vim.wait(5) -- Wait 5ms between checks for responsiveness
     end
     
-    if not completed then
-        -- Timeout fallback
+    -- If extraction didn't complete or failed, provide sensible fallbacks
+    if not completed or extraction_error or not tags or vim.tbl_isempty(tags) then
+        -- Provide some common tag suggestions as fallback
         tags = {
-            ["example"] = 1,
-            ["timeout"] = 1
+            ["todo"] = 1,
+            ["project"] = 1,
+            ["note"] = 1,
+            ["idea"] = 1,
+            ["important"] = 1
         }
     end
     
