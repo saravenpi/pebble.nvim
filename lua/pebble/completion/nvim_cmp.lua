@@ -67,8 +67,8 @@ end
 
 --- nvim-cmp source: complete function
 function source:complete(request, callback)
-	-- Debug: log when completion is called
-	vim.notify("Pebble completion called", vim.log.levels.INFO)
+	-- Debug: uncomment to log when completion is called
+	-- vim.notify("Pebble completion called", vim.log.levels.INFO)
 	
 	-- Safety wrapper for callback
 	local function safe_callback(result)
@@ -130,11 +130,11 @@ function source:complete(request, callback)
 		
 		-- Check for tag context first  
 		local is_tag, tag_query = utils.is_tag_context()
-		vim.notify("Debug: is_tag=" .. tostring(is_tag) .. ", tag_query='" .. (tag_query or "nil") .. "'")
+		-- vim.notify("Debug: is_tag=" .. tostring(is_tag) .. ", tag_query='" .. (tag_query or "nil") .. "'")
 		if is_tag then
 			local root_dir = utils.get_root_dir()
 			items = utils.get_tag_completions(tag_query, root_dir)
-			vim.notify("Tag context detected: '" .. (tag_query or "") .. "', found " .. #items .. " items")
+			-- vim.notify("Tag context detected: '" .. (tag_query or "") .. "', found " .. #items .. " items")
 		else
 			-- Check for wiki link context
 			local is_wiki, wiki_query = utils.is_wiki_link_context()
