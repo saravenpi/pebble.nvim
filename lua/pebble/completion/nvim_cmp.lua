@@ -61,7 +61,8 @@ end
 
 --- nvim-cmp source: check if available in current context
 function source:is_available()
-	return completion.is_completion_enabled()
+	-- Only available in markdown files
+	return vim.bo.filetype == "markdown"
 end
 
 --- nvim-cmp source: complete function
@@ -83,7 +84,8 @@ function source:complete(request, callback)
 	end
 
 	-- Only complete in markdown files
-	if not completion.is_completion_enabled() then
+	-- Always enabled for markdown files
+	if vim.bo.filetype ~= "markdown" then
 		safe_callback({ items = {}, isIncomplete = false })
 		return
 	end
@@ -108,8 +110,8 @@ function source:complete(request, callback)
 		end
 		
 		-- Check if we're inside existing wiki or markdown link contexts
-		local is_wiki, _ = completion.is_wiki_link_context()
-		local is_markdown, _ = completion.is_markdown_link_context()
+		local is_wiki, _ = utils.is_wiki_link_context()
+		local is_markdown, _ = utils.is_markdown_link_context()
 		
 		if is_wiki or is_markdown then
 			should_complete = true
