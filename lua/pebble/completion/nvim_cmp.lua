@@ -155,6 +155,9 @@ function source:complete(request, callback)
 			end
 		end
 		
+		-- Debug: Log how many items we got from completion functions
+		vim.notify("Raw completion items found: " .. #items)
+		
 		-- Limit results to max_item_count
 		local max_items = self.opts and self.opts.max_item_count or 50
 		if #items > max_items then
@@ -186,10 +189,17 @@ function source:complete(request, callback)
 			table.insert(cmp_items, cmp_item)
 		end
 
-		return {
+		-- Debug: Log what we're returning
+		local result = {
 			items = cmp_items,
 			isIncomplete = false
 		}
+		vim.notify("Pebble returning " .. #result.items .. " items to nvim-cmp")
+		if #result.items > 0 then
+			vim.notify("First item: " .. result.items[1].label .. " (" .. result.items[1].kind .. ")")
+		end
+		
+		return result
 	end)
 
 	if ok then
