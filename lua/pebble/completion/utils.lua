@@ -137,7 +137,7 @@ function M.get_wiki_completions(query, root_dir)
         return {
             {
                 label = "No markdown files found",
-                kind = vim.lsp.protocol.CompletionItemKind.Text,
+                kind = 1, -- Text kind
                 detail = "Create .md files to see wiki link completions",
                 insertText = "new-note"
             }
@@ -261,7 +261,7 @@ function M.get_wiki_completions(query, root_dir)
             if should_include then
                 table.insert(completions, {
                     label = alias.label,
-                    kind = vim.lsp.protocol.CompletionItemKind.File,
+                    kind = 17, -- File kind
                     detail = alias.detail,
                     insertText = alias.insertText,
                     documentation = "Wiki link to " .. alias.detail .. " (" .. alias.alias_type .. ")",
@@ -324,7 +324,7 @@ function M.get_markdown_link_completions(query, root_dir)
         return {
             {
                 label = "No markdown files found",
-                kind = vim.lsp.protocol.CompletionItemKind.Text,
+                kind = 1, -- Text kind
                 detail = "Create .md files to see link completions",
                 insertText = "./new-note.md"
             }
@@ -354,7 +354,7 @@ function M.get_markdown_link_completions(query, root_dir)
         if not query or query == "" or filename:lower():match(query:lower()) or relative_path:lower():match(query:lower()) then
             table.insert(completions, {
                 label = relative_from_current,
-                kind = vim.lsp.protocol.CompletionItemKind.File,
+                kind = 17, -- File kind
                 detail = relative_path,
                 insertText = relative_from_current,
                 documentation = "Link to " .. relative_path,
@@ -460,7 +460,7 @@ function M.get_tag_completions(query, root_dir)
         if not query or query == "" or tag:lower():match(query:lower()) then
             table.insert(completions, {
                 label = tag,
-                kind = vim.lsp.protocol.CompletionItemKind.Keyword,
+                kind = 14, -- Keyword kind
                 detail = string.format("Used %d times", count),
                 insertText = tag,
                 documentation = "Tag found in markdown files",
@@ -495,7 +495,7 @@ function M.get_tag_completions(query, root_dir)
         completions = {
             {
                 label = "No tags found",
-                kind = vim.lsp.protocol.CompletionItemKind.Text,
+                kind = 1, -- Text kind
                 detail = "Add #tags to your markdown files to see completions",
                 insertText = "new-tag"
             }
