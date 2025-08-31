@@ -68,7 +68,7 @@ end
 --- nvim-cmp source: complete function
 function source:complete(request, callback)
 	-- Debug: uncomment to log when completion is called
-	-- vim.notify("Pebble completion called", vim.log.levels.INFO)
+	vim.notify("Pebble completion called", vim.log.levels.INFO)
 	
 	-- Safety wrapper for callback
 	local function safe_callback(result)
@@ -130,23 +130,27 @@ function source:complete(request, callback)
 		
 		-- Check for tag context first  
 		local is_tag, tag_query = utils.is_tag_context()
-		-- vim.notify("Debug: is_tag=" .. tostring(is_tag) .. ", tag_query='" .. (tag_query or "nil") .. "'")
+		vim.notify("Debug: is_tag=" .. tostring(is_tag) .. ", tag_query='" .. (tag_query or "nil") .. "'")
 		if is_tag then
 			local root_dir = utils.get_root_dir()
 			items = utils.get_tag_completions(tag_query, root_dir)
-			-- vim.notify("Tag context detected: '" .. (tag_query or "") .. "', found " .. #items .. " items")
+			vim.notify("Tag context detected: '" .. (tag_query or "") .. "', found " .. #items .. " items")
 		else
 			-- Check for wiki link context
 			local is_wiki, wiki_query = utils.is_wiki_link_context()
+			vim.notify("Debug: is_wiki=" .. tostring(is_wiki) .. ", wiki_query='" .. (wiki_query or "nil") .. "'")
 			if is_wiki then
 				local root_dir = utils.get_root_dir()
 				items = utils.get_wiki_completions(wiki_query, root_dir)
+				vim.notify("Wiki context detected: '" .. (wiki_query or "") .. "', found " .. #items .. " items")
 			else
 				-- Check for markdown link context
 				local is_markdown, markdown_query = utils.is_markdown_link_context()
+				vim.notify("Debug: is_markdown=" .. tostring(is_markdown) .. ", markdown_query='" .. (markdown_query or "nil") .. "'")
 				if is_markdown then
 					local root_dir = utils.get_root_dir()
 					items = utils.get_markdown_link_completions(markdown_query, root_dir)
+					vim.notify("Markdown context detected: '" .. (markdown_query or "") .. "', found " .. #items .. " items")
 				end
 			end
 		end

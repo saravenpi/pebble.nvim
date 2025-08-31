@@ -2,8 +2,8 @@
 local M = {}
 
 local registered_sources = {}
--- Avoid circular dependency by lazy loading completion module
-local completion
+-- Use utils module to avoid circular dependencies
+local utils
 
 -- Configuration defaults
 local DEFAULT_CONFIG = {
@@ -67,15 +67,15 @@ function M.setup(config)
 	debug_log("Initializing completion manager")
 	
 	-- Initialize utils system
-	if not completion then
+	if not utils then
 		local ok
-		ok, completion = pcall(require, "pebble.completion.utils")
+		ok, utils = pcall(require, "pebble.completion.utils")
 		if not ok then
 			vim.notify("Failed to load completion utils", vim.log.levels.ERROR)
 			return false
 		end
 	end
-	completion.setup({
+	utils.setup({
 		cache_ttl = manager_config.cache_ttl,
 		cache_max_size = manager_config.cache_max_size,
 	})
@@ -274,7 +274,7 @@ function M.setup_cache_invalidation()
 	vim.api.nvim_create_autocmd({ "BufWritePost", "BufNewFile", "BufDelete" }, {
 		pattern = "*.md",
 		callback = function()
-			completion.invalidate_cache()
+			if utils then utils.invalidate_cache() end
 			debug_log("Cache invalidated due to file change")
 		end,
 		group = vim.api.nvim_create_augroup("PebbleCompletionCacheInvalidation", { clear = true })
@@ -283,7 +283,7 @@ end
 
 -- Get manager status and statistics
 function M.get_status()
-	local completion_stats = completion.get_stats()
+	local utils_stats = utils and utils.get_stats() or {}
 	
 	-- Get detailed status for each registered source
 	local source_details = {}
@@ -306,7 +306,7 @@ function M.get_status()
 		config = manager_config,
 		registered_sources = registered_sources,
 		source_details = source_details,
-		completion_stats = completion_stats,
+		completion_stats = utils_stats,
 		available_engines = {
 			nvim_cmp = pcall(require, "cmp") and true or false,
 			blink_cmp = pcall(require, "blink.cmp") and true or false,
@@ -316,29 +316,30 @@ end
 
 -- Manual cache refresh
 function M.refresh_cache()
-	completion.invalidate_cache()
+	if utils then utils.invalidate_cache() end
 	debug_log("Manual cache refresh triggered")
 	return true
 end
 
 -- Test completion functionality
 function M.test_completion()
-	local is_wiki, wiki_query = completion.is_wiki_link_context()
-	local is_markdown, markdown_query = completion.is_markdown_link_context()
+	if not utils then return {} end
+	local is_wiki, wiki_query = utils.is_wiki_link_context()
+	local is_markdown, markdown_query = utils.is_markdown_link_context()
 	
 	local results = {}
 	
 	if is_wiki then
-		local root_dir = completion.get_root_dir()
-		local completions = completion.get_wiki_completions(wiki_query, root_dir)
+		local root_dir = utils.get_root_dir()
+		local completions = utils.get_wiki_completions(wiki_query, root_dir)
 		results.wiki_links = {
 			query = wiki_query,
 			count = #completions,
 			items = vim.tbl_map(function(item) return item.label end, vim.list_slice(completions, 1, 5))
 		}
 	elseif is_markdown then
-		local root_dir = completion.get_root_dir()
-		local completions = completion.get_markdown_link_completions(markdown_query, root_dir)
+		local root_dir = utils.get_root_dir()
+		local completions = utils.get_markdown_link_completions(markdown_query, root_dir)
 		results.markdown_links = {
 			query = markdown_query,
 			count = #completions,
@@ -391,10 +392,10 @@ function M.setup_commands()
 			"Available engines: " .. vim.inspect(status.available_engines),
 			"",
 			"Cache stats:",
-			"  Valid: " .. tostring(status.completion_stats.cache_valid),
-			"  Size: " .. status.completion_stats.cache_size .. " notes",
-			"  Age: " .. math.floor(status.completion_stats.cache_age / 1000) .. " seconds",
-			"  TTL: " .. math.floor(status.completion_stats.cache_ttl / 1000) .. " seconds",
+			"  Valid: " .. tostring((status.completion_stats.cache or {}).valid),
+			"  Size: " .. ((status.completion_stats.cache or {}).size or 0) .. " items",
+			"  Hits: " .. ((status.completion_stats.cache or {}).hits or 0),
+			"  Misses: " .. ((status.completion_stats.cache or {}).misses or 0),
 		}
 		vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 	end, { desc = "Show Pebble completion status" })
