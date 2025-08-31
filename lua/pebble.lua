@@ -188,22 +188,13 @@ local function build_file_cache_sync()
 		})
 	end
 
-	-- Process files with better batching
-	local batch_size = 50
-	local processed = 0
-	
+	-- Process files directly without scheduling (sync version)
 	for _, file_path in ipairs(md_files or {}) do
 		local filename = vim.fn.fnamemodify(file_path, ":t:r")
 		if not file_cache[filename] then
 			file_cache[filename] = {}
 		end
 		table.insert(file_cache[filename], file_path)
-		
-		processed = processed + 1
-		-- Yield control periodically to prevent blocking UI
-		if processed % batch_size == 0 then
-			vim.schedule(function() end)  -- Yield to UI
-		end
 	end
 
 	cache_valid = true
