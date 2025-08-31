@@ -46,11 +46,12 @@ function M.is_wiki_link_context()
     local line = vim.api.nvim_get_current_line()
     local col = vim.api.nvim_win_get_cursor(0)[2]
     
-    -- Check for [[ pattern before cursor
+    -- Check for [[ pattern before cursor, anchored to end
     local before_cursor = line:sub(1, col)
-    local wiki_start = before_cursor:match("%[%[([^%]]*)")
+    -- Look for the last [[ pattern that hasn't been closed
+    local wiki_start = before_cursor:match(".*%[%[([^%]]*)$")
     
-    if wiki_start then
+    if wiki_start ~= nil then  -- wiki_start can be empty string
         return true, wiki_start
     end
     
@@ -61,11 +62,12 @@ function M.is_markdown_link_context()
     local line = vim.api.nvim_get_current_line()
     local col = vim.api.nvim_win_get_cursor(0)[2]
     
-    -- Check for ]( pattern before cursor
+    -- Check for ]( pattern before cursor, anchored to end
     local before_cursor = line:sub(1, col)
-    local link_start = before_cursor:match("%]%(([^%)]*)")
+    -- Look for the last ]( pattern that hasn't been closed
+    local link_start = before_cursor:match(".*%]%(([^%)]*)$")
     
-    if link_start then
+    if link_start ~= nil then  -- link_start can be empty string
         return true, link_start
     end
     
