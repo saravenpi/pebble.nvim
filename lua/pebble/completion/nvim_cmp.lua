@@ -33,7 +33,7 @@ function M.register(opts)
 		name = source_name,
 		priority = opts.priority or 100,
 		max_item_count = opts.max_item_count or 50,
-		trigger_characters = opts.trigger_characters or { "[", "(" },
+		trigger_characters = opts.trigger_characters or { "[", "(", "#" },
 		keyword_pattern = opts.keyword_pattern or [[\k\+]],
 		keyword_length = opts.keyword_length or 0,
 		debug = opts.debug or false,
@@ -125,17 +125,24 @@ function source:complete(request, callback)
 		-- Get completions based on context
 		local items = {}
 		
-		-- Check for wiki link context
-		local is_wiki, wiki_query = utils.is_wiki_link_context()
-		if is_wiki then
+		-- Check for tag context first
+		local is_tag, tag_query = utils.is_tag_context()
+		if is_tag then
 			local root_dir = utils.get_root_dir()
-			items = utils.get_wiki_completions(wiki_query, root_dir)
+			items = utils.get_tag_completions(tag_query, root_dir)
 		else
-			-- Check for markdown link context
-			local is_markdown, markdown_query = utils.is_markdown_link_context()
-			if is_markdown then
+			-- Check for wiki link context
+			local is_wiki, wiki_query = utils.is_wiki_link_context()
+			if is_wiki then
 				local root_dir = utils.get_root_dir()
-				items = utils.get_markdown_link_completions(markdown_query, root_dir)
+				items = utils.get_wiki_completions(wiki_query, root_dir)
+			else
+				-- Check for markdown link context
+				local is_markdown, markdown_query = utils.is_markdown_link_context()
+				if is_markdown then
+					local root_dir = utils.get_root_dir()
+					items = utils.get_markdown_link_completions(markdown_query, root_dir)
+				end
 			end
 		end
 		
