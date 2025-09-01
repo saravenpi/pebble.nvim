@@ -127,12 +127,9 @@ function M.register_all_sources()
 	M.setup_cache_invalidation()
 	
 	-- Log results
-	if success_count > 0 then
-		local message = string.format("Registered %d/%d completion sources successfully", success_count, total_sources)
-		vim.notify("Pebble: " .. message, vim.log.levels.INFO)
-	elseif total_sources > 0 then
+	if success_count == 0 and total_sources > 0 then
 		vim.notify("Pebble: Failed to register any completion sources. Check that nvim-cmp or blink.cmp is installed.", vim.log.levels.WARN)
-	else
+	elseif total_sources == 0 then
 		debug_log("No completion sources enabled in config")
 	end
 	
