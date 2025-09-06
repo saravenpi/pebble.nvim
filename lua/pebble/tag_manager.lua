@@ -178,7 +178,7 @@ function M.add_tag_to_current_file(tag)
 	return true
 end
 
--- Get all files that contain a specific tag using ripgrep (optimized)
+-- Get all files that contain a specific tag using ripgrep (ultra-optimized)
 function M.find_files_with_tag(tag, callback)
 	if not search.has_ripgrep() then
 		vim.notify("ripgrep is required for tag search", vim.log.levels.ERROR)
@@ -190,21 +190,28 @@ function M.find_files_with_tag(tag, callback)
 	-- Escape special regex characters in tag name
 	local escaped_tag = tag:gsub("([%.%-%+%*%?%[%]%^%$%(%)%%])", "\\%1")
 	
-	-- Use a single optimized ripgrep command with OR patterns for better performance
-	local pattern = "(#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$))|(tags:.*" .. escaped_tag .. ")|(- " .. escaped_tag .. "$)"
-	
-	-- Run single ripgrep search asynchronously to prevent UI freezing
-	vim.system({
-		"rg", 
+	-- ULTRA FAST: Trust ripgrep completely, no file verification needed
+	-- Use multiple optimized patterns with ultra-fast flags
+	local cmd = {
+		"rg",
 		"--type", "md",
 		"--files-with-matches",
-		"--max-count", "1", -- Stop at first match per file for speed
-		pattern,
+		"--no-heading",
+		"--no-line-number",
+		"--max-count", "1", -- Stop at first match per file
+		"--threads", "0", -- Use all available CPU threads
+		"--mmap", -- Use memory mapping for speed
+		"-e", "#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$)", -- Inline tags
+		"-e", "tags:.*" .. escaped_tag, -- YAML array format
+		"-e", "- " .. escaped_tag .. "$", -- YAML list format
 		root_dir
-	}, {}, function(result)
+	}
+	
+	-- Execute ultra-fast ripgrep search
+	vim.system(cmd, {}, function(result)
 		vim.schedule(function()
 			if result.code ~= 0 then
-				callback({}, "No files found with tag: " .. tag)
+				callback({}, nil)
 				return
 			end
 			
@@ -212,47 +219,45 @@ function M.find_files_with_tag(tag, callback)
 			-- Remove empty lines
 			files = vim.tbl_filter(function(file) return file ~= "" end, files)
 			
-			-- Quick validation: only verify files that are likely matches
-			-- This reduces file I/O significantly
-			local verified_files = {}
-			local batch_size = 10
-			local processed = 0
-			
-			local function process_batch(start_idx)
-				local end_idx = math.min(start_idx + batch_size - 1, #files)
-				
-				for i = start_idx, end_idx do
-					local file = files[i]
-					local file_tags = extract_tags_from_file(file)
-					if vim.tbl_contains(file_tags, tag) then
-						table.insert(verified_files, file)
-					end
-				end
-				
-				processed = end_idx
-				
-				if processed < #files then
-					-- Schedule next batch to avoid blocking UI
-					vim.schedule(function()
-						process_batch(processed + 1)
-					end)
-				else
-					-- All done, call callback
-					callback(verified_files, nil)
-				end
-			end
-			
-			-- Start processing batches
-			if #files > 0 then
-				process_batch(1)
-			else
-				callback({}, nil)
-			end
+			-- NO FILE VERIFICATION - Trust ripgrep results completely
+			callback(files, nil)
 		end)
 	end)
 end
 
--- Build tag cache using ripgrep for performance (optimized)
+-- Synchronous ultra-fast tag search for instant results
+local function find_files_with_tag_sync(tag)
+	if not search.has_ripgrep() then
+		return {}
+	end
+	
+	local root_dir = search.get_root_dir()
+	local escaped_tag = tag:gsub("([%.%-%+%*%?%[%]%^%$%(%)%%])", "\\%1")
+	
+	local cmd = {
+		"rg",
+		"--type", "md",
+		"--files-with-matches",
+		"--no-heading",
+		"--no-line-number",
+		"--max-count", "1",
+		"--threads", "0",
+		"--mmap",
+		"-e", "#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$)",
+		"-e", "tags:.*" .. escaped_tag,
+		"-e", "- " .. escaped_tag .. "$",
+		root_dir
+	}
+	
+	local result = vim.fn.systemlist(cmd)
+	if vim.v.shell_error ~= 0 then
+		return {}
+	end
+	
+	return vim.tbl_filter(function(file) return file ~= "" end, result)
+end
+
+-- Build tag cache using ripgrep for performance (ultra-optimized)
 local function build_tag_cache()
 	if not search.has_ripgrep() then
 		return {}
@@ -265,20 +270,22 @@ local function build_tag_cache()
 	
 	local root_dir = search.get_root_dir()
 	
-	-- Use faster ripgrep with optimized flags
+	-- ULTRA FAST: Use maximum ripgrep performance flags
 	local cmd = {
 		"rg", 
 		"--type", "md",
 		"--no-heading",
 		"--no-line-number",
 		"--no-filename",
-		"--max-count", "100", -- Limit matches per file for speed
-		"-o",
+		"--threads", "0", -- Use all CPU threads
+		"--mmap", -- Memory mapping for speed
+		"--max-count", "50", -- Reasonable limit per file
+		"-o", -- Only matching part
 		"#[a-zA-Z0-9_][a-zA-Z0-9_/%-]*",
 		root_dir
 	}
 	
-	-- Execute command with timeout to prevent hanging
+	-- Execute ultra-fast command
 	local result = vim.fn.systemlist(cmd)
 	if vim.v.shell_error ~= 0 then
 		return {}
@@ -372,8 +379,8 @@ function M.find_files_with_tag_ui(tag)
 	-- Clean the tag (remove # if present)
 	tag = tag:gsub("^#", "")
 	
-	-- Show progress indicator
-	vim.notify("🔍 Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
+	-- Show ultra-fast search indicator
+	vim.notify("⚡ Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
 	
 	M.find_files_with_tag(tag, function(files, err)
 		if err then
