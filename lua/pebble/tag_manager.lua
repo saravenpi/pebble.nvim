@@ -191,10 +191,7 @@ function M.find_files_with_tag(tag, callback)
 	local escaped_tag = tag:gsub("([%.%-%+%*%?%[%]%^%$%(%)%%])", "\\%1")
 	
 	-- Use a single optimized ripgrep command with OR patterns for better performance
-	local pattern = string.format(
-		"(#%s([^a-zA-Z0-9_/%-]|$))|(tags:.*%s)|(- %s$)",
-		escaped_tag, escaped_tag, escaped_tag
-	)
+	local pattern = "(#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$))|(tags:.*" .. escaped_tag .. ")|(- " .. escaped_tag .. "$)"
 	
 	-- Run single ripgrep search asynchronously to prevent UI freezing
 	vim.system({
