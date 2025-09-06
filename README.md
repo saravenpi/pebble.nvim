@@ -324,12 +324,12 @@ Pebble provides three types of intelligent completion:
 | `:PebbleDiagnose` | Run comprehensive system diagnostics |
 | `:PebbleReset` | Reset all caches and internal state |
 | `:PebbleBuildCache` | Build file cache with progress notification |
-| `:PebbleTagsSetup` | Interactive setup wizard for tag completion |
-| `:PebbleTagsStats` | Show tag completion statistics |
-| `:PebbleTestTags` | Run tag completion system tests |
 | `:PebbleAddTag [tag]` | Add tag to current file (interactive if no tag provided) |
 | `:PebbleShowTags` | Show tags in current file with telescope UI |
 | `:PebbleFindTag [tag]` | Find all files containing a specific tag |
+| `:AddTag [tag]` | Short alias for PebbleAddTag |
+| `:Tags` | Short alias for PebbleShowTags |
+| `:FindTag [tag]` | Short alias for PebbleFindTag |
 
 ## Default Keymaps
 
@@ -564,6 +564,7 @@ views:
 - **Search by Tag**: Press `<leader>tf` to find all files containing a specific tag
 - **Smart Integration**: Works with both frontmatter tags and inline `#tags`
 - **Ripgrep Optimization**: Lightning-fast tag search across large repositories
+- **Short Commands**: Use `:AddTag`, `:Tags`, and `:FindTag` for quick access
 
 ### Interactive Graph View
 - **Visual Network**: See all connected files in a clean, interactive interface

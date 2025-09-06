@@ -190,6 +190,7 @@ function M.find_files_with_tag(tag, callback)
 	-- Search for both inline tags and frontmatter tags
 	-- Escape special regex characters in tag name
 	local escaped_tag = tag:gsub("([%.%-%+%*%?%[%]%^%$%(%)%%])", "\\%1")
+	vim.notify("Debug: searching for tag '" .. tag .. "' (escaped: '" .. escaped_tag .. "')", vim.log.levels.DEBUG)
 	local patterns = {
 		"#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$)", -- Inline tags
 		"tags:.*" .. escaped_tag, -- Frontmatter array format
@@ -216,12 +217,14 @@ function M.find_files_with_tag(tag, callback)
 	
 	-- Filter results by actually checking file contents
 	local verified_files = {}
+	vim.notify("Debug: found " .. #all_files .. " potential files, verifying...", vim.log.levels.DEBUG)
 	for _, file in ipairs(all_files) do
 		local file_tags = extract_tags_from_file(file)
 		if vim.tbl_contains(file_tags, tag) then
 			table.insert(verified_files, file)
 		end
 	end
+	vim.notify("Debug: verified " .. #verified_files .. " files with tag", vim.log.levels.DEBUG)
 	
 	-- Call callback asynchronously to maintain API consistency
 	vim.schedule(function()
@@ -295,7 +298,8 @@ function M.show_current_file_tags()
 	local actions = require('telescope.actions')
 	local action_state = require('telescope.actions.state')
 	
-	pickers.new({}, {
+	local opts_telescope = require("telescope.themes").get_dropdown({})
+	pickers.new(opts_telescope, {
 		prompt_title = "Tags in Current File",
 		finder = finders.new_table({
 			results = current_tags,
@@ -337,6 +341,9 @@ function M.find_files_with_tag_ui(tag)
 	-- Clean the tag (remove # if present)
 	tag = tag:gsub("^#", "")
 	
+	-- Debug: notify about the search
+	vim.notify("Searching for files with tag: " .. tag, vim.log.levels.INFO)
+	
 	M.find_files_with_tag(tag, function(files, err)
 		if err then
 			vim.notify("Error searching for tag: " .. err, vim.log.levels.ERROR)
@@ -362,7 +369,8 @@ function M.find_files_with_tag_ui(tag)
 		local actions = require('telescope.actions')
 		local action_state = require('telescope.actions.state')
 		
-		pickers.new({}, {
+		local opts_telescope = require("telescope.themes").get_dropdown({})
+		pickers.new(opts_telescope, {
 			prompt_title = "Files with tag: #" .. tag .. " (" .. #files .. " files)",
 			finder = finders.new_table({
 				results = files,

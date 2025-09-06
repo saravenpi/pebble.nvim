@@ -1484,34 +1484,6 @@ function M.setup(opts)
 		{ desc = "Refresh tag completion cache" }
 	)
 	vim.api.nvim_create_user_command(
-		"PebbleTagsStats",
-		function()
-			local completion = require("pebble.completion")
-			local stats = completion.get_stats()
-			print("=== Pebble Tag Completion Statistics ===")
-			if stats.tags then
-				print("Tag cache entries: " .. stats.tags.entries_count)
-				print("Cache age: " .. math.floor(stats.tags.cache_age / 1000) .. " seconds")
-				print("Cache valid: " .. tostring(stats.tags.is_valid))
-				print("Root directory: " .. (stats.tags.root_dir or "not set"))
-			else
-				print("Tag completion not initialized")
-			end
-		end,
-		{ desc = "Show tag completion statistics" }
-	)
-	vim.api.nvim_create_user_command(
-		"PebbleTagsSetup",
-		function()
-			local config = require("pebble.completion.config")
-			local wizard_config = config.setup_wizard()
-			if wizard_config then
-				vim.notify("Completion configured! Configuration shown above.", vim.log.levels.INFO)
-			end
-		end,
-		{ desc = "Run pebble completion setup wizard" }
-	)
-	vim.api.nvim_create_user_command(
 		"PebbleCompletionWizard",
 		function()
 			local config = require("pebble.completion.config")
@@ -1539,13 +1511,6 @@ function M.setup(opts)
 			end
 		end,
 		{ desc = "Show or list completion configuration presets", nargs = "?" }
-	)
-	vim.api.nvim_create_user_command(
-		"PebbleTestTags",
-		function()
-			require("pebble.completion.test").run_all_tests()
-		end,
-		{ desc = "Run tag completion tests" }
 	)
 	vim.api.nvim_create_user_command(
 		"PebbleDiagnose",
@@ -1592,6 +1557,40 @@ function M.setup(opts)
 	)
 	vim.api.nvim_create_user_command(
 		"PebbleFindTag",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			if opts.args ~= "" then
+				tag_manager.find_files_with_tag_ui(opts.args)
+			else
+				tag_manager.find_files_with_tag_ui()
+			end
+		end,
+		{ desc = "Find files with specific tag", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+	)
+	
+	-- Shorter tag command aliases for convenience
+	vim.api.nvim_create_user_command(
+		"AddTag",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			if opts.args ~= "" then
+				tag_manager.add_tag_to_current_file(opts.args)
+			else
+				tag_manager.add_tag_interactive()
+			end
+		end,
+		{ desc = "Add tag to current file", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+	)
+	vim.api.nvim_create_user_command(
+		"Tags",
+		function()
+			local tag_manager = require("pebble.tag_manager")
+			tag_manager.show_current_file_tags()
+		end,
+		{ desc = "Show tags in current file" }
+	)
+	vim.api.nvim_create_user_command(
+		"FindTag",
 		function(opts)
 			local tag_manager = require("pebble.tag_manager")
 			if opts.args ~= "" then
