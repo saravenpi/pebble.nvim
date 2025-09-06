@@ -6,7 +6,7 @@
 
 **Production-Ready Obsidian-style Markdown Link Navigation for Neovim**
 
-Transform your Neovim into a powerful knowledge management system with wiki-style links, intelligent completion, and database views.
+Transform your Neovim into a powerful knowledge management system with wiki-style links and intelligent completion.
 
 ## ✨ Key Features
 
@@ -14,7 +14,7 @@ Transform your Neovim into a powerful knowledge management system with wiki-styl
 - **🧠 Intelligent Completion**: Ultra-fast tag (`#`), wiki link (`[[`), and markdown link completion
 - **📊 Interactive Graph View**: Visualize your markdown link network with telescope integration  
 - **⚡ Performance Optimized**: Sub-second file discovery with ripgrep, intelligent caching, async processing
-- **🗄️ Database Views (Bases)**: Create and view Obsidian-compatible database views with complex filtering
+- **🎨 Syntax Highlighting**: Automatic highlighting for tags (`#tag`) and HTTPS/HTTP links
 - **📝 Link Management**: Create links from selected text with smart filename cleaning
 - **🔄 Navigation History**: Seamless back/forward navigation through your knowledge base
 - **⚙️ Production Ready**: Comprehensive error handling, diagnostics, and emergency recovery options
@@ -32,7 +32,7 @@ Transform your Neovim into a powerful knowledge management system with wiki-styl
 
 ### Dependencies
 
-- **Required**: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) - Used for bases functionality
+- **Required**: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) - Used for graph functionality
 - **Required**: [ripgrep](https://github.com/BurntSushi/ripgrep) - Fast file search for completion and search features
 - **Optional**: [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) - Enhanced syntax highlighting
 - **Optional**: [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) - Completion framework support
@@ -83,7 +83,7 @@ cargo install ripgrep
     },
     ft = "markdown", -- Load only for markdown files
     config = function()
-        -- Auto-configure based on your repository size and setup
+        -- Auto-configure based on your repository size
         require('PRODUCTION_CONFIG').auto()
     end
 }
@@ -241,7 +241,7 @@ use {
 1. Open a markdown file
 2. Create links using `[[file-name]]` syntax
 3. Place cursor on a link and press `<CR>` to follow it
-4. Use `<Tab>` and `<S-Tab>` to jump between links
+4. Use `<Tab>` and `<S-Tab>` to jump between all types of links (wiki, markdown, HTTP/HTTPS)
 5. Use `<leader>mp` and `<leader>mn` to navigate history
 6. Use the graph view to explore your link network
 
@@ -292,10 +292,6 @@ Pebble provides three types of intelligent completion:
 - **Scalability**: Efficiently handles 2000+ markdown files
 - **Fallback Support**: Works without ripgrep using vim.fs.find
 
-### Database Views (Bases)
-- Create `.base` files with YAML configuration
-- Press `<leader>mB` to list all available bases
-- Press `<leader>bo` when editing a `.base` file to preview it
 - Navigate with `j/k`, `↑/↓`, `G/gg`
 - Press `<CR>` to open selected file
 - Press `r` to refresh the cache
@@ -320,8 +316,6 @@ Pebble provides three types of intelligent completion:
 | `:PebbleInitHeader` | Initialize YAML header if not present |
 | `:PebbleIncreaseHeading` | Increase markdown heading level |
 | `:PebbleDecreaseHeading` | Decrease markdown heading level |
-| `:PebbleBase [path]` | Open a base view (current file if no path) |
-| `:PebbleBases` | List and select available base files |
 | `:PebbleSearch <pattern>` | Search in markdown files using ripgrep |
 | `:PebbleComplete` | Test wiki link completion in current context |
 | `:PebbleCompletionStats` | Show completion cache statistics |
@@ -329,7 +323,6 @@ Pebble provides three types of intelligent completion:
 | `:PebbleDiagnose` | Run comprehensive system diagnostics |
 | `:PebbleReset` | Reset all caches and internal state |
 | `:PebbleBuildCache` | Build file cache with progress notification |
-| `:PebbleBaseAsync <path>` | Open base view asynchronously (non-blocking) |
 | `:PebbleTagsSetup` | Interactive setup wizard for tag completion |
 | `:PebbleTagsStats` | Show tag completion statistics |
 | `:PebbleTestTags` | Run tag completion system tests |
@@ -337,9 +330,9 @@ Pebble provides three types of intelligent completion:
 ## Default Keymaps
 
 ### Markdown Files
-- `<CR>` - Follow link under cursor
-- `<Tab>` - Next link in buffer
-- `<S-Tab>` - Previous link in buffer
+- `<CR>` - Follow link under cursor (opens HTTP/HTTPS links in browser, navigates to files for wiki/markdown links)
+- `<Tab>` - Next link in buffer (supports all link types)
+- `<S-Tab>` - Previous link in buffer (supports all link types)
 - `<Ctrl+t>` or `<leader>mt` - Toggle markdown checklist/todo item
 - `<leader>mg` - Toggle graph view
 - `<leader>mv` - Toggle visual graph view
@@ -555,7 +548,7 @@ views:
 
 ### Navigation System
 - **History Tracking**: Automatic back/forward navigation with `<leader>mp` (previous) and `<leader>mn` (next)
-- **Smart Link Jumping**: Use `<Tab>` and `<Shift-Tab>` to move between links in a file
+- **Smart Link Jumping**: Use `<Tab>` and `<Shift-Tab>` to move between all link types (wiki, markdown, HTTP/HTTPS)
 - **Fallback Behavior**: `<CR>` falls back to default behavior when not on a link
 
 ### Interactive Graph View

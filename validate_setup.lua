@@ -103,9 +103,7 @@ print_header("Core Components")
 
 local components = {
     {"Main module", "pebble"},
-    {"Search module", "pebble.bases.search"},
-    {"Cache module", "pebble.bases.cache"},
-    {"Parser module", "pebble.bases.parser"},
+    {"Search module", "pebble.search"},
     {"Completion core", "pebble.completion"},
     {"Tag completion", "pebble.completion.tags"},
     {"nvim-cmp source", "pebble.completion.nvim_cmp"},
@@ -121,7 +119,7 @@ end
 -- Test 2: External Dependencies
 print_header("External Dependencies")
 
-local search = require('pebble.bases.search')
+local search = require('pebble.search')
 local has_rg = search.has_ripgrep()
 local rg_version = search.get_ripgrep_version()
 
@@ -163,7 +161,7 @@ else
 end
 
 -- Cache performance
-local cache = require('pebble.bases.cache')
+-- Cache module removed
 start_time = vim.loop.hrtime()
 local file_data = cache.get_file_data(vim.fn.getcwd())
 end_time = vim.loop.hrtime()
@@ -283,7 +281,7 @@ print_check("Tag pattern validation", all_tag_tests_pass,
 -- Test frontmatter parsing
 local frontmatter = completion.parse_frontmatter or function(path)
     -- Fallback if function not directly accessible
-    local cache = require('pebble.bases.cache')
+    -- Cache module removed
     local data = cache.get_file_data(vim.fn.getcwd())
     for _, file in ipairs(data) do
         if file.path:match("test%-note1%.md$") then

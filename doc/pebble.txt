@@ -1,4 +1,4 @@
-*pebble.txt*   Obsidian-style markdown link navigation and database views for Neovim
+*pebble.txt*   Obsidian-style markdown link navigation for Neovim
 
                     _______________
                    /               \
@@ -21,7 +21,6 @@ CONTENTS                                                    *pebble-contents*
 5. Keymaps..............................|pebble-keymaps|
 6. Configuration........................|pebble-configuration|
 7. Features.............................|pebble-features|
-8. Bases................................|pebble-bases|
 9. FAQ..................................|pebble-faq|
 
 ==============================================================================
@@ -35,7 +34,6 @@ navigation and management. It allows you to:
 • View an interactive graph of connected files
 • Navigate with history (back/forward)
 • Create links from selected text
-• Create database views with Obsidian-compatible .base files
 • Manage markdown headings and YAML frontmatter
 • Cache file lookups for performance
 
@@ -95,8 +93,6 @@ Basic usage:
 *:PebbleInitHeader*    Initialize YAML frontmatter header
 *:PebbleIncreaseHeading* Increase markdown heading level
 *:PebbleDecreaseHeading* Decrease markdown heading level
-*:PebbleBase*          Open a base view (current file or specified path)
-*:PebbleBases*         List and select available base files
 
 ==============================================================================
 5. KEYMAPS                                                   *pebble-keymaps*
@@ -116,19 +112,6 @@ Default keymaps (markdown files):
 *+*              Increase heading level
 *-*              Decrease heading level
 
-Base files (.base):
-
-*<leader>bo*     Open current base view
-
-Base view navigation:
-
-*j* / *k*        Navigate rows
-*↑* / *↓*        Navigate rows
-*G*              Go to last item
-*gg*             Go to first item
-*<CR>*           Open selected file
-*r*              Refresh cache
-*q* / *<Esc>*    Close view
 
 Global keymaps (when global_keymaps = true):
 
@@ -136,8 +119,6 @@ Global keymaps (when global_keymaps = true):
 *<leader>mv*     Toggle visual graph view
 *<leader>mp*     Go to previous in navigation history
 *<leader>mn*     Go to next in navigation history
-*<leader>mB*     List available bases
-*<leader>mb*     Open current base view
 
 ==============================================================================
 6. CONFIGURATION                                       *pebble-configuration*

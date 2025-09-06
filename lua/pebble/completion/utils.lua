@@ -2,7 +2,7 @@
 local M = {}
 
 -- Import the search module for ripgrep functionality
-local search = require("pebble.bases.search")
+local search = require("pebble.search")
 
 -- Cache management
 local cache = {}

@@ -106,9 +106,9 @@ local function ensure_file_alias(file_path)
 	alias_cache[file_path] = true
 end
 
---- Get root directory using centralized search utility
+--- Get root directory using search utility
 local function get_root_dir()
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	return search.get_root_dir()
 end
 
@@ -119,7 +119,7 @@ local function build_file_cache_async(callback)
 	local cwd = get_root_dir()
 
 	-- Use optimized search with ripgrep
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	
 	search.find_markdown_files_async(cwd, function(md_files, err)
 		if err or not md_files then
@@ -171,7 +171,7 @@ local function build_file_cache_sync()
 	local cwd = get_root_dir()
 
 	-- Try optimized search first
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	local md_files
 	
 	if search.has_ripgrep() then
@@ -274,6 +274,25 @@ local function get_link_under_cursor()
 		end
 		
 		start_pos = md_end + 1
+		if start_pos > #line then break end
+	end
+
+	-- Find HTTP/HTTPS links in the line
+	start_pos = 1
+	while start_pos <= #line do
+		local http_start, http_end = line:find("https\?://[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=-]\+", start_pos)
+		if not http_start then
+			break
+		end
+		
+		if col >= http_start and col <= http_end then
+			local link_url = line:sub(http_start, http_end)
+			if link_url and link_url ~= "" then
+				return link_url, "http"
+			end
+		end
+		
+		start_pos = http_end + 1
 		if start_pos > #line then break end
 	end
 
@@ -498,6 +517,9 @@ local function open_link(link, link_type)
 				vim.notify("Created file: " .. filename .. ".md", vim.log.levels.INFO)
 			end
 		end
+	elseif link_type == "http" then
+		-- Open HTTP/HTTPS links in default browser
+		vim.fn.system("open " .. vim.fn.shellescape(link))
 	end
 end
 
@@ -516,7 +538,7 @@ function M.follow_link()
 	end
 end
 
---- Find all markdown links in the current buffer
+--- Find all links in the current buffer (obsidian, markdown, and HTTP/HTTPS)
 local function find_all_links()
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local links = {}
@@ -557,12 +579,30 @@ local function find_all_links()
 			
 			start_pos = md_end + 1
 		end
+
+		-- Find all HTTP/HTTPS links in the line
+		start_pos = 1
+		while true do
+			local http_start, http_end = line:find("https\?://[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=-]\+", start_pos)
+			if not http_start then
+				break
+			end
+			
+			table.insert(links, {
+				line = line_num,
+				col = http_start,
+				end_col = http_end,
+				type = "http",
+			})
+			
+			start_pos = http_end + 1
+		end
 	end
 
 	return links
 end
 
---- Navigate to the next markdown link in the buffer
+--- Navigate to the next link in the buffer
 function M.next_link()
 	local links = find_all_links()
 	if #links == 0 then
@@ -585,7 +625,7 @@ function M.next_link()
 	end
 end
 
---- Navigate to the previous markdown link in the buffer
+--- Navigate to the previous link in the buffer
 function M.prev_link()
 	local links = find_all_links()
 	if #links == 0 then
@@ -898,7 +938,7 @@ local function find_links_in_file_async(file_path, callback)
 	end
 
 	-- Use ripgrep for fast link extraction
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	if search.has_ripgrep() then
 		search.extract_links_async(vim.fn.fnamemodify(file_path, ":h"), function(all_links, err)
 			if err then
@@ -1178,24 +1218,36 @@ function M.toggle_graph()
 	picker:find()
 end
 
---- Setup tags syntax highlighting for markdown files
-local function setup_tags_syntax(opts)
+--- Setup tags and links syntax highlighting for markdown files
+local function setup_syntax_highlighting(opts)
 	opts = opts or {}
 	local enable_tags = opts.enable_tags ~= false -- Default to true
+	local enable_links = opts.enable_links ~= false -- Default to true
 	local tag_color = opts.tag_highlight or "Special"
+	local link_color = opts.link_highlight or "Underlined"
 	
-	if not enable_tags then
+	if not enable_tags and not enable_links then
 		return
 	end
 	
 	vim.api.nvim_create_autocmd("FileType", {
 		pattern = "markdown",
 		callback = function()
-			-- Add hashtag syntax highlighting - improved pattern to handle more cases
-			vim.cmd([[
-				syntax match PebbleTag /#[a-zA-Z0-9_-]\+/ containedin=ALL
-				highlight link PebbleTag ]] .. tag_color .. [[
-			]])
+			if enable_tags then
+				-- Add hashtag syntax highlighting - improved pattern to handle more cases
+				vim.cmd([[
+					syntax match PebbleTag /#[a-zA-Z0-9_-]\+/ containedin=ALL
+					highlight link PebbleTag ]] .. tag_color .. [[
+				]])
+			end
+			
+			if enable_links then
+				-- Add HTTPS/HTTP link highlighting
+				vim.cmd([[
+					syntax match PebbleHttpsLink /https\?:\/\/[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=-]\+/ containedin=ALL
+					highlight link PebbleHttpsLink ]] .. link_color .. [[
+				]])
+			end
 		end,
 	})
 end
@@ -1240,7 +1292,7 @@ function M.setup_completion(completion_opts)
 	completion_manager.setup_commands()
 	
 	-- Check for ripgrep and warn if not available
-	local search_ok, search = pcall(require, "pebble.bases.search")
+	local search_ok, search = pcall(require, "pebble.search")
 	if search_ok and not search.has_ripgrep() then
 		vim.notify("Pebble: ripgrep not found - file discovery will be slower. Install ripgrep for optimal performance.", vim.log.levels.WARN)
 	end
@@ -1266,7 +1318,7 @@ function M.setup(opts)
 	end
 
 	-- Configure search optimization with ripgrep
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	if opts.search then
 		search.setup(opts.search)
 	end
@@ -1279,8 +1331,8 @@ function M.setup(opts)
 		end
 	end
 
-	-- Setup tags syntax highlighting
-	setup_tags_syntax(opts)
+	-- Setup syntax highlighting for tags and links
+	setup_syntax_highlighting(opts)
 
 	vim.api.nvim_create_autocmd({ "BufWritePost", "BufNewFile", "BufDelete" }, {
 		pattern = "*.md",
@@ -1335,28 +1387,9 @@ function M.setup(opts)
 		{ desc = "Initialize YAML header" }
 	)
 	vim.api.nvim_create_user_command(
-		"PebbleBase",
-		function(opts)
-			local bases = require("pebble.bases")
-			if opts.args ~= "" then
-				bases.open_base(opts.args)
-			else
-				bases.open_current_base()
-			end
-		end,
-		{ desc = "Open a base view", nargs = "?", complete = "file" }
-	)
-	vim.api.nvim_create_user_command(
-		"PebbleBases",
-		function()
-			require("pebble.bases").list_bases()
-		end,
-		{ desc = "List and select available bases" }
-	)
-	vim.api.nvim_create_user_command(
 		"PebbleSearch",
 		function(opts)
-			local search = require("pebble.bases.search")
+			local search = require("pebble.search")
 			local root_dir = get_root_dir()
 			
 			if opts.args == "" then
@@ -1539,21 +1572,6 @@ function M.setup(opts)
 		end,
 		{ desc = "Build file cache with progress notification" }
 	)
-	vim.api.nvim_create_user_command(
-		"PebbleBaseAsync",
-		function(opts)
-			if opts.args ~= "" then
-				M.open_base_async(opts.args, function(success, err)
-					if not success then
-						vim.notify("Failed to open base: " .. (err or "unknown error"), vim.log.levels.ERROR)
-					end
-				end)
-			else
-				vim.notify("Usage: :PebbleBaseAsync <base_file_path>", vim.log.levels.WARN)
-			end
-		end,
-		{ desc = "Open base view asynchronously", nargs = "?", complete = "file" }
-	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1642,26 +1660,12 @@ function M.setup(opts)
 			end,
 		})
 		
-		vim.api.nvim_create_autocmd("FileType", {
-			pattern = "base",
-			callback = function()
-				local buf_opts = { buffer = true, silent = true }
-				vim.keymap.set(
-					"n",
-					"<leader>bo",
-					function() require("pebble.bases").open_current_base() end,
-					vim.tbl_extend("force", buf_opts, { desc = "Open current base view" })
-				)
-			end,
-		})
 	end
 
 	if opts.global_keymaps then
 		vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
 		vim.keymap.set("n", "<leader>mp", M.go_back, { desc = "Go to previous in markdown history" })
 		vim.keymap.set("n", "<leader>mn", M.go_forward, { desc = "Go to next in markdown history" })
-		vim.keymap.set("n", "<leader>mB", function() require("pebble.bases").list_bases() end, { desc = "List available bases" })
-		vim.keymap.set("n", "<leader>mb", function() require("pebble.bases").open_current_base() end, { desc = "Open current/select base view" })
 	end
 end
 
@@ -1670,38 +1674,18 @@ function M.get_completion()
 	return require("pebble.completion")
 end
 
---- Access to bases functionality with enhanced features
-function M.get_bases()
-	return require("pebble.bases")
-end
-
 --- Access to search functionality
 function M.get_search()
-	return require("pebble.bases.search")
-end
-
---- Diagnostic function to check pebble health
-function M.diagnose()
-	local bases = require("pebble.bases")
-	return bases.diagnose()
+	return require("pebble.search")
 end
 
 --- Reset all caches and state
 function M.reset()
-	local bases = require("pebble.bases")
-	bases.reset()
-	
 	-- Reset local caches
 	invalidate_graph_caches()
 	cache_valid = false
 	
 	vim.notify("All pebble caches reset", vim.log.levels.INFO)
-end
-
---- Async version of open_base for better performance
-function M.open_base_async(base_path, callback)
-	local bases = require("pebble.bases")
-	return bases.open_base_async(base_path, callback)
 end
 
 --- Enhanced file building with progress notification

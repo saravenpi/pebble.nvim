@@ -112,7 +112,7 @@ local function get_root_dir()
         return tag_cache.root_dir
     end
     
-    local search = safe_require("pebble.bases.search")
+    local search = safe_require("pebble.search")
     if search then
         local success, root = pcall(search.get_root_dir)
         if success and root and type(root) == "string" and root ~= "" then
@@ -367,7 +367,7 @@ local function extract_tags_with_ripgrep_safe(root_dir, callback)
         return
     end
     
-    local search = safe_require("pebble.bases.search")
+    local search = safe_require("pebble.search")
     if not search or not search.has_ripgrep or not search.has_ripgrep() then
         callback({}, {}, "Ripgrep not available")
         return

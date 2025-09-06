@@ -173,7 +173,7 @@ end
 local function get_all_notes(root_dir)
 	-- Wrap in error handling
 	local ok, result = pcall(function()
-		local search = require("pebble.bases.search")
+		local search = require("pebble.search")
 		
 		-- Check cache validity
 		local now = vim.loop.now()
@@ -393,7 +393,7 @@ end
 
 -- Get root directory using centralized utility
 function M.get_root_dir()
-	local search = require("pebble.bases.search")
+	local search = require("pebble.search")
 	return search.get_root_dir()
 end
 

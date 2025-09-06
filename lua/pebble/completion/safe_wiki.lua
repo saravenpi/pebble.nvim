@@ -66,7 +66,7 @@ local function get_root_dir()
         return wiki_cache.root_dir
     end
     
-    local search = safe_require("pebble.bases.search")
+    local search = safe_require("pebble.search")
     if search then
         local success, root = pcall(search.get_root_dir)
         if success and root then
@@ -271,7 +271,7 @@ end
 -- Safe file discovery with multiple fallback strategies
 local function discover_markdown_files_safe(root_dir, callback)
     local files = {}
-    local search = safe_require("pebble.bases.search")
+    local search = safe_require("pebble.search")
     
     -- Strategy 1: Use pebble search module (fastest)
     if search and search.has_ripgrep then

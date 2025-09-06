@@ -55,7 +55,7 @@ local function get_root_dir()
         return tag_cache.root_dir
     end
     
-    local search = require("pebble.bases.search")
+    local search = require("pebble.search")
     tag_cache.root_dir = search.get_root_dir()
     return tag_cache.root_dir
 end
@@ -89,7 +89,7 @@ end
 
 -- Check if ripgrep is available using centralized utility
 local function has_ripgrep()
-    local search = require("pebble.bases.search")
+    local search = require("pebble.search")
     return search.has_ripgrep()
 end
 
