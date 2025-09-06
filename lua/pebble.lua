@@ -1317,11 +1317,7 @@ function M.setup(opts)
 		end
 	end
 
-	-- Configure search optimization with ripgrep
-	local search = require("pebble.search")
-	if opts.search then
-		search.setup(opts.search)
-	end
+	-- Search module is ready to use (no setup required)
 
 	-- Setup completion system with enhanced error handling
 	if opts.completion and opts.completion.enabled ~= false then
