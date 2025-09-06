@@ -366,13 +366,64 @@ end
 -- Show telescope UI for files with a specific tag
 function M.find_files_with_tag_ui(tag)
 	if not tag then
-		vim.ui.input({
-			prompt = "Enter tag name: ",
-		}, function(input)
-			if input and input ~= "" then
-				M.find_files_with_tag_ui(input)
-			end
-		end)
+		-- Show available tags for quick selection using telescope
+		vim.notify("⚡ Loading available tags...", vim.log.levels.INFO)
+		
+		-- Build tag cache asynchronously for instant UI response
+		local existing_tags = build_tag_cache()
+		
+		if #existing_tags == 0 then
+			vim.notify("❌ No tags found in repository", vim.log.levels.WARN)
+			return
+		end
+		
+		vim.notify("✅ Found " .. #existing_tags .. " tags", vim.log.levels.INFO)
+		
+		-- Check if telescope is available for tag selection
+		local telescope_ok, telescope = pcall(require, 'telescope')
+		if telescope_ok then
+			local pickers = require('telescope.pickers')
+			local finders = require('telescope.finders')
+			local conf = require('telescope.config')
+			local actions = require('telescope.actions')
+			local action_state = require('telescope.actions.state')
+			
+			local opts_telescope = require("telescope.themes").get_dropdown({})
+			pickers.new(opts_telescope, {
+				prompt_title = "⚡ Select Tag to Search",
+				finder = finders.new_table({
+					results = existing_tags,
+					entry_maker = function(entry)
+						return {
+							value = entry,
+							display = "#" .. entry,
+							ordinal = entry,
+						}
+					end,
+				}),
+				sorter = conf.values.generic_sorter({}),
+				attach_mappings = function(prompt_bufnr, map)
+					actions.select_default:replace(function()
+						actions.close(prompt_bufnr)
+						local selection = action_state.get_selected_entry()
+						if selection then
+							M.find_files_with_tag_ui(selection.value)
+						end
+					end)
+					return true
+				end,
+			}):find()
+		else
+			-- Fallback to input with completion
+			vim.ui.input({
+				prompt = "Enter tag name: ",
+				completion = "customlist,v:lua.require('pebble.tag_manager').complete_tags",
+			}, function(input)
+				if input and input ~= "" then
+					M.find_files_with_tag_ui(input)
+				end
+			end)
+		end
 		return
 	end
 	
