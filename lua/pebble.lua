@@ -280,7 +280,7 @@ local function get_link_under_cursor()
 	-- Find HTTP/HTTPS links in the line
 	start_pos = 1
 	while start_pos <= #line do
-		local http_start, http_end = line:find("https\?://[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=-]\+", start_pos)
+		local http_start, http_end = line:find("https?://[a-zA-Z0-9._~:/?#%%[%%]@!$&'()*+,;=-]+", start_pos)
 		if not http_start then
 			break
 		end
@@ -583,7 +583,7 @@ local function find_all_links()
 		-- Find all HTTP/HTTPS links in the line
 		start_pos = 1
 		while true do
-			local http_start, http_end = line:find("https\?://[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=-]\+", start_pos)
+			local http_start, http_end = line:find("https?://[a-zA-Z0-9._~:/?#%%[%%]@!$&'()*+,;=-]+", start_pos)
 			if not http_start then
 				break
 			end
