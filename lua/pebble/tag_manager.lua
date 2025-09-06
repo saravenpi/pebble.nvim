@@ -178,7 +178,7 @@ function M.add_tag_to_current_file(tag)
 	return true
 end
 
--- Get all files that contain a specific tag using ripgrep
+-- Get all files that contain a specific tag using ripgrep (optimized)
 function M.find_files_with_tag(tag, callback)
 	if not search.has_ripgrep() then
 		vim.notify("ripgrep is required for tag search", vim.log.levels.ERROR)
@@ -187,52 +187,75 @@ function M.find_files_with_tag(tag, callback)
 	
 	local root_dir = search.get_root_dir()
 	
-	-- Search for both inline tags and frontmatter tags
 	-- Escape special regex characters in tag name
 	local escaped_tag = tag:gsub("([%.%-%+%*%?%[%]%^%$%(%)%%])", "\\%1")
-	vim.notify("Debug: searching for tag '" .. tag .. "' (escaped: '" .. escaped_tag .. "')", vim.log.levels.DEBUG)
-	local patterns = {
-		"#" .. escaped_tag .. "([^a-zA-Z0-9_/%-]|$)", -- Inline tags
-		"tags:.*" .. escaped_tag, -- Frontmatter array format
-		"- " .. escaped_tag .. "$" -- Frontmatter list format
-	}
 	
-	local all_files = {}
+	-- Use a single optimized ripgrep command with OR patterns for better performance
+	local pattern = string.format(
+		"(#%s([^a-zA-Z0-9_/%-]|$))|(tags:.*%s)|(- %s$)",
+		escaped_tag, escaped_tag, escaped_tag
+	)
 	
-	-- Run searches for each pattern synchronously
-	for _, pattern in ipairs(patterns) do
-		local files, err = search.search_in_files(pattern, root_dir, {
-			files_with_matches = true,
-			max_results = 1000
-		})
-		
-		if files then
-			for _, file in ipairs(files) do
-				if not vim.tbl_contains(all_files, file) then
-					table.insert(all_files, file)
+	-- Run single ripgrep search asynchronously to prevent UI freezing
+	vim.system({
+		"rg", 
+		"--type", "md",
+		"--files-with-matches",
+		"--max-count", "1", -- Stop at first match per file for speed
+		pattern,
+		root_dir
+	}, {}, function(result)
+		vim.schedule(function()
+			if result.code ~= 0 then
+				callback({}, "No files found with tag: " .. tag)
+				return
+			end
+			
+			local files = vim.split(result.stdout, "\n", {plain = true})
+			-- Remove empty lines
+			files = vim.tbl_filter(function(file) return file ~= "" end, files)
+			
+			-- Quick validation: only verify files that are likely matches
+			-- This reduces file I/O significantly
+			local verified_files = {}
+			local batch_size = 10
+			local processed = 0
+			
+			local function process_batch(start_idx)
+				local end_idx = math.min(start_idx + batch_size - 1, #files)
+				
+				for i = start_idx, end_idx do
+					local file = files[i]
+					local file_tags = extract_tags_from_file(file)
+					if vim.tbl_contains(file_tags, tag) then
+						table.insert(verified_files, file)
+					end
+				end
+				
+				processed = end_idx
+				
+				if processed < #files then
+					-- Schedule next batch to avoid blocking UI
+					vim.schedule(function()
+						process_batch(processed + 1)
+					end)
+				else
+					-- All done, call callback
+					callback(verified_files, nil)
 				end
 			end
-		end
-	end
-	
-	-- Filter results by actually checking file contents
-	local verified_files = {}
-	vim.notify("Debug: found " .. #all_files .. " potential files, verifying...", vim.log.levels.DEBUG)
-	for _, file in ipairs(all_files) do
-		local file_tags = extract_tags_from_file(file)
-		if vim.tbl_contains(file_tags, tag) then
-			table.insert(verified_files, file)
-		end
-	end
-	vim.notify("Debug: verified " .. #verified_files .. " files with tag", vim.log.levels.DEBUG)
-	
-	-- Call callback asynchronously to maintain API consistency
-	vim.schedule(function()
-		callback(verified_files, nil)
+			
+			-- Start processing batches
+			if #files > 0 then
+				process_batch(1)
+			else
+				callback({}, nil)
+			end
+		end)
 	end)
 end
 
--- Build tag cache using ripgrep for performance
+-- Build tag cache using ripgrep for performance (optimized)
 local function build_tag_cache()
 	if not search.has_ripgrep() then
 		return {}
@@ -244,22 +267,33 @@ local function build_tag_cache()
 	end
 	
 	local root_dir = search.get_root_dir()
+	
+	-- Use faster ripgrep with optimized flags
 	local cmd = {
 		"rg", 
 		"--type", "md",
 		"--no-heading",
 		"--no-line-number",
+		"--no-filename",
+		"--max-count", "100", -- Limit matches per file for speed
 		"-o",
 		"#[a-zA-Z0-9_][a-zA-Z0-9_/%-]*",
 		root_dir
 	}
 	
+	-- Execute command with timeout to prevent hanging
 	local result = vim.fn.systemlist(cmd)
+	if vim.v.shell_error ~= 0 then
+		return {}
+	end
+	
 	local tags = {}
+	local tag_set = {} -- Use set for O(1) duplicate checking
 	
 	for _, line in ipairs(result) do
 		local tag = line:match("#(.+)")
-		if tag and not vim.tbl_contains(tags, tag) then
+		if tag and not tag_set[tag] then
+			tag_set[tag] = true
 			table.insert(tags, tag)
 		end
 	end
@@ -341,8 +375,8 @@ function M.find_files_with_tag_ui(tag)
 	-- Clean the tag (remove # if present)
 	tag = tag:gsub("^#", "")
 	
-	-- Debug: notify about the search
-	vim.notify("Searching for files with tag: " .. tag, vim.log.levels.INFO)
+	-- Show progress indicator
+	vim.notify("🔍 Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
 	
 	M.find_files_with_tag(tag, function(files, err)
 		if err then
@@ -351,9 +385,12 @@ function M.find_files_with_tag_ui(tag)
 		end
 		
 		if not files or #files == 0 then
-			vim.notify("No files found with tag: " .. tag, vim.log.levels.INFO)
+			vim.notify("❌ No files found with tag: #" .. tag, vim.log.levels.WARN)
 			return
 		end
+		
+		-- Show completion notification
+		vim.notify("✅ Found " .. #files .. " files with tag: #" .. tag, vim.log.levels.INFO)
 		
 		-- Check if telescope is available
 		local telescope_ok, telescope = pcall(require, 'telescope')

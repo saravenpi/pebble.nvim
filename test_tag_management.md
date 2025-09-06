@@ -26,23 +26,23 @@ This file contains various inline tags for testing:
 3. `:PebbleFindTag` - Find files containing a specific tag
 
 ### Keymaps:
-- `<leader>ta` - Add tag to current file
-- `<leader>ts` - Show tags in current file  
-- `<leader>tf` - Find files with tag
+- `<leader>mta` - Add tag to current file
+- `<leader>mts` - Show tags in current file  
+- `<leader>mtf` - Find files with tag
 
 ## Testing Instructions
 
 1. **Add Tags**:
-   - Press `<leader>ta` in normal mode
+   - Press `<leader>mta` in normal mode
    - Type a new tag name (autocomplete available)
    - Tag will be added to frontmatter
 
 2. **View Tags**:
-   - Press `<leader>ts` to see all tags in this file
+   - Press `<leader>mts` to see all tags in this file
    - Select a tag to find other files with the same tag
 
 3. **Search Tags**:
-   - Press `<leader>tf` to search for files by tag
+   - Press `<leader>mtf` to search for files by tag
    - Enter tag name or select from autocomplete
    - Browse results with telescope
 

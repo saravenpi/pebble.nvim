@@ -1639,7 +1639,7 @@ function M.setup(opts)
 				)
 				vim.keymap.set(
 					{ "n", "i" },
-					"<leader>mt",
+					"<leader>mx",
 					M.toggle_checklist,
 					vim.tbl_extend("force", buf_opts, { desc = "Toggle markdown checklist" })
 				)
@@ -1677,7 +1677,7 @@ function M.setup(opts)
 				-- Tag management keymaps
 				vim.keymap.set(
 					"n",
-					"<leader>ta",
+					"<leader>mta",
 					function()
 						local tag_manager = require("pebble.tag_manager")
 						tag_manager.add_tag_interactive()
@@ -1686,7 +1686,7 @@ function M.setup(opts)
 				)
 				vim.keymap.set(
 					"n",
-					"<leader>ts",
+					"<leader>mts",
 					function()
 						local tag_manager = require("pebble.tag_manager")
 						tag_manager.show_current_file_tags()
@@ -1695,7 +1695,7 @@ function M.setup(opts)
 				)
 				vim.keymap.set(
 					"n",
-					"<leader>tf",
+					"<leader>mtf",
 					function()
 						local tag_manager = require("pebble.tag_manager")
 						tag_manager.find_files_with_tag_ui()

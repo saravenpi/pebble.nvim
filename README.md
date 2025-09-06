@@ -337,15 +337,15 @@ Pebble provides three types of intelligent completion:
 - `<CR>` - Follow link under cursor (opens HTTP/HTTPS links in browser, navigates to files for wiki/markdown links)
 - `<Tab>` - Next link in buffer (supports all link types)
 - `<S-Tab>` - Previous link in buffer (supports all link types)
-- `<Ctrl+t>` or `<leader>mt` - Toggle markdown checklist/todo item
+- `<Ctrl+t>` or `<leader>mx` - Toggle markdown checklist/todo item
 - `<leader>mg` - Toggle graph view
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mc` - Create link, file and navigate (visual mode)
 - `<leader>ml` - Create link and file without navigation (visual mode)
 - `<leader>mh` - Initialize YAML header
-- `<leader>ta` - Add tag to current file
-- `<leader>ts` - Show tags in current file
-- `<leader>tf` - Find files with tag
+- `<leader>mta` - Add tag to current file
+- `<leader>mts` - Show tags in current file
+- `<leader>mtf` - Find files with tag
 - `+` - Increase heading level
 - `-` - Decrease heading level
 
@@ -559,9 +559,9 @@ views:
 - **Fallback Behavior**: `<CR>` falls back to default behavior when not on a link
 
 ### Tag Management
-- **Add Tags**: Press `<leader>ta` to add tags to the current file with autocompletion
-- **View File Tags**: Press `<leader>ts` to see all tags in the current file with telescope UI
-- **Search by Tag**: Press `<leader>tf` to find all files containing a specific tag
+- **Add Tags**: Press `<leader>mta` to add tags to the current file with autocompletion
+- **View File Tags**: Press `<leader>mts` to see all tags in the current file with telescope UI
+- **Search by Tag**: Press `<leader>mtf` to find all files containing a specific tag
 - **Smart Integration**: Works with both frontmatter tags and inline `#tags`
 - **Ripgrep Optimization**: Lightning-fast tag search across large repositories
 - **Short Commands**: Use `:AddTag`, `:Tags`, and `:FindTag` for quick access
