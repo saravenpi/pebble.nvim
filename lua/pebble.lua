@@ -1572,6 +1572,40 @@ function M.setup(opts)
 		end,
 		{ desc = "Build file cache with progress notification" }
 	)
+	
+	-- Tag management commands
+	vim.api.nvim_create_user_command(
+		"PebbleAddTag",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			if opts.args ~= "" then
+				tag_manager.add_tag_to_current_file(opts.args)
+			else
+				tag_manager.add_tag_interactive()
+			end
+		end,
+		{ desc = "Add tag to current file", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleShowTags",
+		function()
+			local tag_manager = require("pebble.tag_manager")
+			tag_manager.show_current_file_tags()
+		end,
+		{ desc = "Show tags in current file" }
+	)
+	vim.api.nvim_create_user_command(
+		"PebbleFindTag",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			if opts.args ~= "" then
+				tag_manager.find_files_with_tag_ui(opts.args)
+			else
+				tag_manager.find_files_with_tag_ui()
+			end
+		end,
+		{ desc = "Find files with specific tag", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+	)
 
 	if opts.auto_setup_keymaps ~= false then
 		vim.api.nvim_create_autocmd("FileType", {
@@ -1643,6 +1677,35 @@ function M.setup(opts)
 					"<leader>mh",
 					M.init_yaml_header,
 					vim.tbl_extend("force", buf_opts, { desc = "Initialize YAML header" })
+				)
+				
+				-- Tag management keymaps
+				vim.keymap.set(
+					"n",
+					"<leader>ta",
+					function()
+						local tag_manager = require("pebble.tag_manager")
+						tag_manager.add_tag_interactive()
+					end,
+					vim.tbl_extend("force", buf_opts, { desc = "Add tag to current file" })
+				)
+				vim.keymap.set(
+					"n",
+					"<leader>ts",
+					function()
+						local tag_manager = require("pebble.tag_manager")
+						tag_manager.show_current_file_tags()
+					end,
+					vim.tbl_extend("force", buf_opts, { desc = "Show tags in current file" })
+				)
+				vim.keymap.set(
+					"n",
+					"<leader>tf",
+					function()
+						local tag_manager = require("pebble.tag_manager")
+						tag_manager.find_files_with_tag_ui()
+					end,
+					vim.tbl_extend("force", buf_opts, { desc = "Find files with tag" })
 				)
 				
 				-- Tag completion trigger (if completion is enabled)

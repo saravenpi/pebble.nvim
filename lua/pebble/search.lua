@@ -70,7 +70,7 @@ function M.find_markdown_files_async(root_dir, callback)
 	end)
 end
 
---- Search in markdown files
+--- Search in markdown files synchronously
 function M.search_in_files(pattern, root_dir, opts)
 	opts = opts or {}
 	root_dir = root_dir or M.get_root_dir()
@@ -99,6 +99,46 @@ function M.search_in_files(pattern, root_dir, opts)
 	end
 	
 	return files, nil
+end
+
+--- Search in markdown files asynchronously
+function M.search_in_files_async(pattern, root_dir, opts, callback)
+	opts = opts or {}
+	root_dir = root_dir or M.get_root_dir()
+	
+	if not M.has_ripgrep() then
+		vim.schedule(function()
+			callback({}, "ripgrep not available")
+		end)
+		return
+	end
+	
+	local cmd = {"rg", "--type", "md"}
+	
+	if opts.files_with_matches then
+		table.insert(cmd, "--files-with-matches")
+	end
+	
+	if opts.max_results then
+		table.insert(cmd, "--max-count")
+		table.insert(cmd, tostring(opts.max_results))
+	end
+	
+	table.insert(cmd, pattern)
+	table.insert(cmd, root_dir)
+	
+	vim.system(cmd, {}, function(result)
+		vim.schedule(function()
+			if result.code == 0 then
+				local files = vim.split(result.stdout, "\n", {plain = true})
+				-- Remove empty lines
+				files = vim.tbl_filter(function(file) return file ~= "" end, files)
+				callback(files, nil)
+			else
+				callback({}, "search failed")
+			end
+		end)
+	end)
 end
 
 return M

@@ -15,6 +15,7 @@ Transform your Neovim into a powerful knowledge management system with wiki-styl
 - **📊 Interactive Graph View**: Visualize your markdown link network with telescope integration  
 - **⚡ Performance Optimized**: Sub-second file discovery with ripgrep, intelligent caching, async processing
 - **🎨 Syntax Highlighting**: Automatic highlighting for tags (`#tag`) and HTTPS/HTTP links
+- **🏷️ Tag Management**: Add, view, and search tags across your knowledge base with telescope integration
 - **📝 Link Management**: Create links from selected text with smart filename cleaning
 - **🔄 Navigation History**: Seamless back/forward navigation through your knowledge base
 - **⚙️ Production Ready**: Comprehensive error handling, diagnostics, and emergency recovery options
@@ -326,6 +327,9 @@ Pebble provides three types of intelligent completion:
 | `:PebbleTagsSetup` | Interactive setup wizard for tag completion |
 | `:PebbleTagsStats` | Show tag completion statistics |
 | `:PebbleTestTags` | Run tag completion system tests |
+| `:PebbleAddTag [tag]` | Add tag to current file (interactive if no tag provided) |
+| `:PebbleShowTags` | Show tags in current file with telescope UI |
+| `:PebbleFindTag [tag]` | Find all files containing a specific tag |
 
 ## Default Keymaps
 
@@ -339,6 +343,9 @@ Pebble provides three types of intelligent completion:
 - `<leader>mc` - Create link, file and navigate (visual mode)
 - `<leader>ml` - Create link and file without navigation (visual mode)
 - `<leader>mh` - Initialize YAML header
+- `<leader>ta` - Add tag to current file
+- `<leader>ts` - Show tags in current file
+- `<leader>tf` - Find files with tag
 - `+` - Increase heading level
 - `-` - Decrease heading level
 
@@ -550,6 +557,13 @@ views:
 - **History Tracking**: Automatic back/forward navigation with `<leader>mp` (previous) and `<leader>mn` (next)
 - **Smart Link Jumping**: Use `<Tab>` and `<Shift-Tab>` to move between all link types (wiki, markdown, HTTP/HTTPS)
 - **Fallback Behavior**: `<CR>` falls back to default behavior when not on a link
+
+### Tag Management
+- **Add Tags**: Press `<leader>ta` to add tags to the current file with autocompletion
+- **View File Tags**: Press `<leader>ts` to see all tags in the current file with telescope UI
+- **Search by Tag**: Press `<leader>tf` to find all files containing a specific tag
+- **Smart Integration**: Works with both frontmatter tags and inline `#tags`
+- **Ripgrep Optimization**: Lightning-fast tag search across large repositories
 
 ### Interactive Graph View
 - **Visual Network**: See all connected files in a clean, interactive interface
