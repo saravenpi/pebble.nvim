@@ -93,6 +93,11 @@ local function has_ripgrep()
     return search.has_ripgrep()
 end
 
+-- Check if fd is available for ultra-fast file discovery
+local function has_fd()
+    return vim.fn.executable("fd") == 1
+end
+
 -- Build exclude patterns for ripgrep
 local function build_exclude_patterns()
     local exclude_args = {}
@@ -103,7 +108,94 @@ local function build_exclude_patterns()
     return exclude_args
 end
 
--- Improved ripgrep-based tag extraction
+-- Ultra-fast tag extraction using fd + parallel ripgrep
+local function extract_tags_ultra_fast(root_dir, callback)
+    local tags = {}
+    local frequency = {}
+    
+    -- Build exclude patterns for fd
+    local exclude_args = {}
+    for _, pattern in ipairs(config.exclude_patterns) do
+        table.insert(exclude_args, "--exclude")
+        table.insert(exclude_args, pattern)
+    end
+    
+    -- Single optimized pattern for both inline and frontmatter tags
+    local tag_pattern = "(#[a-zA-Z0-9_][a-zA-Z0-9_/-]*|^\\s*tags:\\s*.+|^\\s*-\\s+[a-zA-Z0-9_/-]+)"
+    
+    -- Ultra-fast file discovery with fd + parallel ripgrep processing
+    local cmd = {
+        "sh", "-c",
+        string.format(
+            "fd -e md -e markdown -e txt -e mdx %s . '%s' | head -500 | xargs -P 4 -I {} rg -o -N '%s' '{}'",
+            table.concat(exclude_args, " "),
+            root_dir,
+            tag_pattern
+        )
+    }
+    
+    vim.fn.jobstart(cmd, {
+        stdout_buffered = true,
+        stderr_buffered = true,
+        timeout = RIPGREP_TIMEOUT,
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    -- Parse different tag formats
+                    local tag = nil
+                    
+                    -- Inline tags: #tag
+                    if line:match("^#") then
+                        tag = normalize_tag(line)
+                    -- Frontmatter array: tags: [tag1, tag2]
+                    elseif line:match("^%s*tags:") then
+                        local tags_content = line:match("^%s*tags:%s*(.+)$")
+                        if tags_content then
+                            -- Handle array format [tag1, tag2, tag3]
+                            local array_match = tags_content:match("^%[(.+)%]$")
+                            if array_match then
+                                for t in array_match:gmatch("([^,]+)") do
+                                    t = normalize_tag(t)
+                                    if t then
+                                        tags[t] = true
+                                        frequency[t] = (frequency[t] or 0) + 1
+                                    end
+                                end
+                            else
+                                -- Single tag format
+                                tag = normalize_tag(tags_content)
+                            end
+                        end
+                    -- List format: - tag
+                    elseif line:match("^%s*-") then
+                        local list_tag = line:match("^%s*-%s*(.+)$")
+                        tag = normalize_tag(list_tag)
+                    end
+                    
+                    if tag then
+                        tags[tag] = true
+                        frequency[tag] = (frequency[tag] or 0) + 1
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    vim.notify("Ultra-fast tag extraction warning: " .. line, vim.log.levels.DEBUG)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code ~= 0 then
+                vim.notify("Ultra-fast tag extraction failed with code: " .. code, vim.log.levels.DEBUG)
+            end
+            callback(tags, frequency)
+        end
+    })
+end
+
+-- Improved ripgrep-based tag extraction (fallback)
 local function extract_tags_with_ripgrep(root_dir, callback)
     local tags = {}
     local frequency = {}
@@ -435,10 +527,21 @@ local function update_tag_cache(callback)
         if callback then callback() end
     end
     
-    if config.async_extraction and has_ripgrep() then
-        extract_tags_with_ripgrep(root_dir, process_results)
+    if config.async_extraction then
+        -- Use ultra-fast method if fd is available, otherwise fallback to ripgrep
+        if has_fd() and has_ripgrep() then
+            extract_tags_ultra_fast(root_dir, process_results)
+        elseif has_ripgrep() then
+            extract_tags_with_ripgrep(root_dir, process_results)
+        else
+            -- Use synchronous extraction in a separate coroutine for better performance
+            vim.schedule(function()
+                local tags, frequency = extract_tags_sync(root_dir)
+                process_results(tags, frequency)
+            end)
+        end
     else
-        -- Use synchronous extraction in a separate coroutine for better performance
+        -- Use synchronous extraction
         vim.schedule(function()
             local tags, frequency = extract_tags_sync(root_dir)
             process_results(tags, frequency)
@@ -750,6 +853,8 @@ function M.get_cache_stats()
         is_updating = tag_cache.is_updating,
         root_dir = tag_cache.root_dir,
         has_ripgrep = has_ripgrep(),
+        has_fd = has_fd(),
+        extraction_method = has_fd() and has_ripgrep() and "ultra-fast" or (has_ripgrep() and "ripgrep" or "sync"),
         config = config
     }
 end
