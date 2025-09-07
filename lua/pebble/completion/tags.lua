@@ -780,10 +780,17 @@ end
 function M.setup(user_config)
     config = vim.tbl_deep_extend("force", default_config, user_config or {})
     
-    -- Pre-warm cache asynchronously
+    -- Pre-warm cache asynchronously with immediate warmup
     vim.schedule(function()
         update_tag_cache()
     end)
+    
+    -- Additional warmup after a short delay to ensure better initial performance
+    vim.defer_fn(function()
+        if not is_cache_valid() then
+            update_tag_cache()
+        end
+    end, 100)
     
     -- Auto-refresh cache on file changes with debouncing
     local refresh_timer = nil

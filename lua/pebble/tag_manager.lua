@@ -367,7 +367,7 @@ end
 function M.find_files_with_tag_ui(tag)
 	if not tag then
 		-- Show available tags for quick selection using telescope
-		vim.notify("⚡ Loading available tags...", vim.log.levels.INFO)
+		vim.notify("🔍 Loading available tags...", vim.log.levels.INFO)
 		
 		-- Build tag cache asynchronously for instant UI response
 		local existing_tags = build_tag_cache()
@@ -390,7 +390,7 @@ function M.find_files_with_tag_ui(tag)
 			
 			local opts_telescope = require("telescope.themes").get_dropdown({})
 			pickers.new(opts_telescope, {
-				prompt_title = "⚡ Select Tag to Search",
+				prompt_title = "🔍 Select Tag to Search",
 				finder = finders.new_table({
 					results = existing_tags,
 					entry_maker = function(entry)
@@ -431,7 +431,7 @@ function M.find_files_with_tag_ui(tag)
 	tag = tag:gsub("^#", "")
 	
 	-- Show ultra-fast search indicator
-	vim.notify("⚡ Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
+	vim.notify("🔍 Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
 	
 	M.find_files_with_tag(tag, function(files, err)
 		if err then
