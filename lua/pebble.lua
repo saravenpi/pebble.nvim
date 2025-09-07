@@ -1559,6 +1559,17 @@ function M.setup(opts)
 		end,
 		{ desc = "Find files with specific tag" }
 	)
+	vim.api.nvim_create_user_command(
+		"PebbleLiveSearchTags",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			tag_manager.live_search_tags(opts.args ~= "" and opts.args or nil)
+		end,
+		{ 
+			desc = "Live search tags with telescope", 
+			nargs = "?" 
+		}
+	)
 	
 	-- Shorter tag command aliases for convenience
 	vim.api.nvim_create_user_command(
@@ -1584,6 +1595,17 @@ function M.setup(opts)
 			tag_manager.find_files_with_tag_ui()
 		end,
 		{ desc = "Find files with specific tag" }
+	)
+	vim.api.nvim_create_user_command(
+		"LiveTags",
+		function(opts)
+			local tag_manager = require("pebble.tag_manager")
+			tag_manager.live_search_tags(opts.args ~= "" and opts.args or nil)
+		end,
+		{ 
+			desc = "Live search tags with telescope", 
+			nargs = "?" 
+		}
 	)
 
 	if opts.auto_setup_keymaps ~= false then

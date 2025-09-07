@@ -363,6 +363,39 @@ function M.show_current_file_tags()
 	}):find()
 end
 
+-- Ultra-fast live grep search for tags using telescope's live_grep
+function M.live_search_tags(initial_tag)
+	local telescope_ok, telescope = pcall(require, 'telescope')
+	if not telescope_ok then
+		vim.notify("Telescope is required for live tag search", vim.log.levels.ERROR)
+		return
+	end
+	
+	local builtin = require('telescope.builtin')
+	local root_dir = search.get_root_dir()
+	
+	-- Use telescope's live_grep with optimized tag search patterns
+	builtin.live_grep({
+		prompt_title = "🔍 Live Tag Search (type tag name)",
+		cwd = root_dir,
+		default_text = initial_tag and ("#" .. initial_tag:gsub("^#", "")) or "#",
+		glob_pattern = "*.md",
+		additional_args = function()
+			return {
+				"--type", "md",
+				"--max-count", "10", -- Limit matches per file for speed
+				"--threads", "0", -- Use all CPU threads
+				"--mmap", -- Memory mapping for speed
+				"--smart-case",
+			}
+		end,
+		layout_config = {
+			preview_width = 0.6,
+		},
+		previewer = require('telescope.config').values.grep_previewer({}),
+	})
+end
+
 -- Show telescope UI for files with a specific tag
 function M.find_files_with_tag_ui(tag)
 	if not tag then
@@ -407,9 +440,22 @@ function M.find_files_with_tag_ui(tag)
 						actions.close(prompt_bufnr)
 						local selection = action_state.get_selected_entry()
 						if selection then
-							M.find_files_with_tag_ui(selection.value)
+							-- Use live search for much faster results
+							M.live_search_tags(selection.value)
 						end
 					end)
+					
+					-- Add mapping for live search mode
+					map('i', '<C-l>', function()
+						actions.close(prompt_bufnr)
+						local selection = action_state.get_selected_entry()
+						if selection then
+							M.live_search_tags(selection.value)
+						else
+							M.live_search_tags()
+						end
+					end)
+					
 					return true
 				end,
 			}):find()
@@ -430,64 +476,8 @@ function M.find_files_with_tag_ui(tag)
 	-- Clean the tag (remove # if present)
 	tag = tag:gsub("^#", "")
 	
-	-- Show ultra-fast search indicator
-	vim.notify("🔍 Searching for tag: #" .. tag .. "...", vim.log.levels.INFO)
-	
-	M.find_files_with_tag(tag, function(files, err)
-		if err then
-			vim.notify("Error searching for tag: " .. err, vim.log.levels.ERROR)
-			return
-		end
-		
-		if not files or #files == 0 then
-			vim.notify("❌ No files found with tag: #" .. tag, vim.log.levels.WARN)
-			return
-		end
-		
-		-- Show completion notification
-		vim.notify("✅ Found " .. #files .. " files with tag: #" .. tag, vim.log.levels.INFO)
-		
-		-- Check if telescope is available
-		local telescope_ok, telescope = pcall(require, 'telescope')
-		if not telescope_ok then
-			-- Fallback: just open the first file
-			vim.cmd("edit " .. vim.fn.fnameescape(files[1]))
-			return
-		end
-		
-		local pickers = require('telescope.pickers')
-		local finders = require('telescope.finders')
-		local conf = require('telescope.config')
-		local actions = require('telescope.actions')
-		local action_state = require('telescope.actions.state')
-		
-		local opts_telescope = require("telescope.themes").get_dropdown({})
-		pickers.new(opts_telescope, {
-			prompt_title = "Files with tag: #" .. tag .. " (" .. #files .. " files)",
-			finder = finders.new_table({
-				results = files,
-				entry_maker = function(entry)
-					return {
-						value = entry,
-						display = vim.fn.fnamemodify(entry, ":."),
-						ordinal = entry,
-						path = entry,
-					}
-				end,
-			}),
-			sorter = conf.values.generic_sorter({}),
-			attach_mappings = function(prompt_bufnr, map)
-				actions.select_default:replace(function()
-					actions.close(prompt_bufnr)
-					local selection = action_state.get_selected_entry()
-					if selection then
-						vim.cmd("edit " .. vim.fn.fnameescape(selection.value))
-					end
-				end)
-				return true
-			end,
-		}):find()
-	end)
+	-- Use live search for instant, interactive results
+	M.live_search_tags(tag)
 end
 
 -- Interactive tag addition

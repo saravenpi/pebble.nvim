@@ -279,6 +279,8 @@ Pebble provides three types of intelligent completion:
   - Frequency-based ranking with fuzzy matching
   - Immediate response with intelligent caching
 
+⚠️ **Note**: The first tag indexing may take a few moments for large repositories as pebble scans all markdown files to build the tag database. Subsequent completions will be instant thanks to intelligent caching.
+
 #### 3. Markdown Link Completion (`[`)
 - **Trigger**: Type `](` for markdown links
 - **Features**:
@@ -327,9 +329,11 @@ Pebble provides three types of intelligent completion:
 | `:PebbleAddTag [tag]` | Add tag to current file (interactive if no tag provided) |
 | `:PebbleShowTags` | Show tags in current file with telescope UI |
 | `:PebbleFindTag [tag]` | Find all files containing a specific tag |
+| `:PebbleLiveSearchTags [tag]` | Live search tags using telescope's live_grep (ultra-fast) |
 | `:AddTag [tag]` | Short alias for PebbleAddTag |
 | `:Tags` | Short alias for PebbleShowTags |
 | `:FindTag [tag]` | Short alias for PebbleFindTag |
+| `:LiveTags [tag]` | Short alias for PebbleLiveSearchTags |
 
 ## Default Keymaps
 
@@ -562,9 +566,17 @@ views:
 - **Add Tags**: Press `<leader>mta` to add tags to the current file with autocompletion
 - **View File Tags**: Press `<leader>mts` to see all tags in the current file with telescope UI
 - **Search by Tag**: Press `<leader>mtf` to find all files containing a specific tag
+- **Live Search Tags**: Use `:LiveTags` for ultra-fast live search using telescope's live_grep
 - **Smart Integration**: Works with both frontmatter tags and inline `#tags`
 - **Ripgrep Optimization**: Lightning-fast tag search across large repositories
-- **Short Commands**: Use `:AddTag`, `:Tags`, and `:FindTag` for quick access
+- **Short Commands**: Use `:AddTag`, `:Tags`, `:FindTag`, and `:LiveTags` for quick access
+
+#### Live Tag Search Features
+- **Real-time Search**: Type and see results instantly as you search
+- **Telescope Integration**: Leverages your existing telescope live_grep configuration
+- **Context Preview**: See tag occurrences in context with file previews
+- **Performance Optimized**: Uses all CPU threads with memory mapping for speed
+- **Smart Case**: Automatically handles case-sensitive/insensitive searching
 
 ### Interactive Graph View
 - **Visual Network**: See all connected files in a clean, interactive interface
