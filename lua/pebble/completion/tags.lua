@@ -1,10 +1,10 @@
 local M = {}
 
 -- Performance configurations
-local TAG_CACHE_TTL = 60000  -- 1 minute TTL
+local TAG_CACHE_TTL = 300000  -- 5 minutes TTL
 local MAX_TAG_RESULTS = 100
-local RIPGREP_TIMEOUT = 3000 -- 3 second timeout for ripgrep
-local MAX_FILES_SCAN = 2000  -- Limit for fallback method
+local RIPGREP_TIMEOUT = 1000 -- 1 second timeout for ripgrep
+local MAX_FILES_SCAN = 500  -- Reduced limit for faster fallback
 
 -- Cache structure
 local tag_cache = {
@@ -38,8 +38,8 @@ local default_config = {
     
     -- Performance options
     async_extraction = true,
-    cache_ttl = 60000,
-    max_files_scan = 2000,
+    cache_ttl = 300000,
+    max_files_scan = 500,
     
     -- Advanced options
     case_sensitive = false,
@@ -797,7 +797,7 @@ function M.setup(user_config)
             refresh_timer = vim.defer_fn(function()
                 M.refresh_cache()
                 refresh_timer = nil
-            end, 2000) -- 2 second delay
+            end, 500) -- 500ms delay for snappier response
         end,
     })
     

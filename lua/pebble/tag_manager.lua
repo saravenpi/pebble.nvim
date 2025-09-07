@@ -8,7 +8,7 @@ local search = require("pebble.search")
 -- Cache for tag data
 local tag_cache = {}
 local cache_timestamp = 0
-local CACHE_TTL = 30000 -- 30 seconds
+local CACHE_TTL = 300000 -- 5 minutes
 
 -- Extract tags from a file's content
 local function extract_tags_from_file(file_path)
