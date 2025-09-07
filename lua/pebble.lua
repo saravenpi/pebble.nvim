@@ -1539,13 +1539,9 @@ function M.setup(opts)
 		"PebbleAddTag",
 		function(opts)
 			local tag_manager = require("pebble.tag_manager")
-			if opts.args ~= "" then
-				tag_manager.add_tag_to_current_file(opts.args)
-			else
-				tag_manager.add_tag_interactive()
-			end
+			tag_manager.add_tag_interactive()
 		end,
-		{ desc = "Add tag to current file", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+		{ desc = "Add tag to current file" }
 	)
 	vim.api.nvim_create_user_command(
 		"PebbleShowTags",
@@ -1559,13 +1555,9 @@ function M.setup(opts)
 		"PebbleFindTag",
 		function(opts)
 			local tag_manager = require("pebble.tag_manager")
-			if opts.args ~= "" then
-				tag_manager.find_files_with_tag_ui(opts.args)
-			else
-				tag_manager.find_files_with_tag_ui()
-			end
+			tag_manager.find_files_with_tag_ui()
 		end,
-		{ desc = "Find files with specific tag", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+		{ desc = "Find files with specific tag" }
 	)
 	
 	-- Shorter tag command aliases for convenience
@@ -1573,13 +1565,9 @@ function M.setup(opts)
 		"AddTag",
 		function(opts)
 			local tag_manager = require("pebble.tag_manager")
-			if opts.args ~= "" then
-				tag_manager.add_tag_to_current_file(opts.args)
-			else
-				tag_manager.add_tag_interactive()
-			end
+			tag_manager.add_tag_interactive()
 		end,
-		{ desc = "Add tag to current file", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+		{ desc = "Add tag to current file" }
 	)
 	vim.api.nvim_create_user_command(
 		"Tags",
@@ -1593,13 +1581,9 @@ function M.setup(opts)
 		"FindTag",
 		function(opts)
 			local tag_manager = require("pebble.tag_manager")
-			if opts.args ~= "" then
-				tag_manager.find_files_with_tag_ui(opts.args)
-			else
-				tag_manager.find_files_with_tag_ui()
-			end
+			tag_manager.find_files_with_tag_ui()
 		end,
-		{ desc = "Find files with specific tag", nargs = "?", complete = "customlist,v:lua.require('pebble.tag_manager').complete_tags" }
+		{ desc = "Find files with specific tag" }
 	)
 
 	if opts.auto_setup_keymaps ~= false then
