@@ -18,7 +18,6 @@ Transform your Neovim into a powerful knowledge management system with wiki-styl
 - **🏷️ Tag Management**: Add, view, and search tags across your knowledge base with telescope integration
 - **📝 Link Management**: Create links from selected text with smart filename cleaning
 - **🔄 Navigation History**: Seamless back/forward navigation through your knowledge base
-- **⚙️ Production Ready**: Comprehensive error handling, diagnostics, and emergency recovery options
 
 ## 🚀 Version 2.0 - December 2024
 
