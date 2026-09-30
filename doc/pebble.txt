@@ -115,8 +115,6 @@ Default keymaps (markdown files):
 
 Global keymaps (when global_keymaps = true):
 
-*<leader>mg*     Toggle graph view
-*<leader>mv*     Toggle visual graph view
 *<leader>mp*     Go to previous in navigation history
 *<leader>mn*     Go to next in navigation history
 
