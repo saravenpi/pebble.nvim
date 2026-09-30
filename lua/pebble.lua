@@ -1723,11 +1723,10 @@ function M.setup(opts)
 				end
 			end,
 		})
-		
 	end
 
 	if opts.global_keymaps then
-		vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
+		-- vim.keymap.set("n", "<leader>mg", M.toggle_graph, { desc = "Toggle markdown graph" })
 		vim.keymap.set("n", "<leader>mp", M.go_back, { desc = "Go to previous in markdown history" })
 		vim.keymap.set("n", "<leader>mn", M.go_forward, { desc = "Go to next in markdown history" })
 	end

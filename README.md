@@ -367,7 +367,6 @@ When viewing a base:
 
 ### Optional Global Keymaps
 Set `global_keymaps = true` in setup to enable:
-- `<leader>mg` - Toggle graph view
 - `<leader>mv` - Toggle visual graph view
 - `<leader>mp` - Go to previous in navigation history
 - `<leader>mn` - Go to next in navigation history
